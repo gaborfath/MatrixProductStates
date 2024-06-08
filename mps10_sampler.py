@@ -220,11 +220,15 @@ if __name__ == '__main__':
     np.random.seed(100)
     sampler = MPS_Sampler(M_tensor)
 
-    N_spins = 100
-    K_paths = 50000
+    N_spins = 10
+    K_paths = 500
     # samples = sampler.generate_vec(N_spins, K_paths)
     samples = sampler(N_spins, K_paths)
     print('samples', samples)
+
+    # save to disk:
+    np.save('samples.npy', samples)  # save
+    ### samples = np.load('samples.npy')  # load
 
     corr, error = sampler.corr_by_time_avr(samples)
     #print('corr:', corr)
