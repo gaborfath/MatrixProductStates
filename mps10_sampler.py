@@ -26,7 +26,9 @@ class MPS_Sampler():
         self.E = self.AuAu + self.AdAd
 
         w, vl, vr = eig(self.E, left=True, right=True)
-        print('w:\n', w)
+        #w_abs = np.flip(np.sort(np.abs(w)))
+        #xi = 1 / np.log(w_abs[0]/w_abs[1])
+        #print('w:\n', w, w_abs, xi)
 
         indices = np.argsort(np.abs(w))
         ind = indices[-1]
@@ -39,20 +41,20 @@ class MPS_Sampler():
         self.R = np.real(vr[:, ind])  # is it valid?
         self.L = np.real(vl[:, ind])  # is it valid?
         self.LR = np.dot(self.L, self.R)
-
-        self.xi = abs(1/np.log(w[indices[-1]] / w[indices[-2]]))
+        self.xi = 1/np.log(np.abs(w[indices[-1]] / w[indices[-2]]))
 
         print('self.LR', self.LR)
         print('leading eig:\n', self.lam, self.L, self.R)
-        print('correlation length: ', abs(self.xi))
+        print('correlation length: ', self.xi)
 
 
     def __call__(self, N_spins, K_paths):
         print('Running sampling')
-        samples = np.empty((K_paths, N_spins))
+        samples = -np.ones((K_paths, N_spins))
         rands = np.random.rand(K_paths, N_spins)
         AuAuR = np.matmul(self.AuAu, self.R) / self.LR
         AdAdR = np.matmul(self.AdAd, self.R) / self.LR
+        pus = -np.ones(N_spins)
 
         for k in range(K_paths):
             if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 200 == 0):
@@ -64,6 +66,12 @@ class MPS_Sampler():
                 #print('hah:', k, 'n:', n, String_AuAuR, String_AdAdR)
                 pu =  String_AuAuR / (String_AuAuR + String_AdAdR)
 
+                if k==0:
+                    pus[n] = pu
+                    print('n:', n, 'formers:', samples[k, n-3:n], 'pu:', pu)
+
+
+
                 if rands[k, n] < pu:  # spin-up sampled
                     samples[k, n] = 1
                     String = np.matmul(String, self.AuAu)
@@ -71,93 +79,19 @@ class MPS_Sampler():
                     samples[k, n] = 0
                     String = np.matmul(String, self.AdAd)
 
+            if k==0:
+                plt.figure(101)
+                plt.title('Distribution of pu probabilities in 1st path')
+                plt.hist(pus, bins=100)
+                plt.pause(0.1)
+
+            #exit()
         return samples
-
-    def __call__old(self, N_spins, K_paths):
-        samples = np.empty((K_paths, N_spins))
-
-
-        for k in range(K_paths):
-            if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 100 == 0):
-                print(k, '-----------\n')
-            String = np.matmul(self.L, np.eye(self.chi**2)) # product of fixed spin operators
-            AuAuR = np.matmul(self.AuAu, self.R) / self.LR
-            p_cond = 1
-            sample = np.empty(N_spins)
-            lamb = np.array([self.lam ** (n+1) for n in range(N_spins)])
-            for n in range(N_spins):
-                String_AuAu = np.matmul(String, AuAuR)
-                #String_AdAd = np.matmul(String, self.AdAd)
-                pu_cond = String_AuAu / lamb[n]
-                #pd_cond = np.matmul(np.matmul(self.L, String_AdAd), self.R) / self.lam ** (n + 1) / self.LR
-                pu = pu_cond / p_cond
-                #print('pu:', pu, 'p_cond:', p_cond, 'pu_cond:', pu_cond, 'pd_cond:', pd_cond)
-                if np.random.rand() < pu:
-                    #print('up')
-                    # spin-up sampled
-                    p_cond = pu_cond #pu
-                    String = np.matmul(String, self.AuAu)
-                    sample[n] = 1
-                else:
-                    #print('down')
-                    # spin-down sampled
-                    p_cond = p_cond-pu_cond #1-pu
-                    String = np.matmul(String, self.AdAd)
-                    sample[n] = 0
-
-            samples[k, :] = sample
-
-        return samples
-
-
-    # def generate_vec(self, N_spins, K_paths):
-    #     samples = np.empty((K_paths, N_spins))
-    #
-    #     chi2 = self.chi**2
-    #     String = np.matmul(self.L, np.eye(chi2)) # product of fixed spin operators
-    #     String_vec = np.reshape(np.tile(String, (K_paths, 1)), (K_paths, chi2))
-    #     AuAuR = np.matmul(self.AuAu, self.R) / self.LR
-    #     p_cond = 1
-    #     p_cond_vec = np.ones(K_paths)
-    #     samples = np.empty((K_paths, N_spins))
-    #     lamb = np.array([self.lam ** (n+1) for n in range(N_spins)])
-    #
-    #     for n in range(N_spins):
-    #         print(String_vec.shape)
-    #         print(AuAuR.shape)
-    #         String_AuAu_vec = np.matmul(String_vec, AuAuR)
-    #
-    #         pu_cond_vec = String_AuAu_vec / lamb[n]
-    #         pu_vec = pu_cond_vec / p_cond_vec
-    #         print(pu_vec.shape)
-    #
-    #         String_vec = np.where(np.random.rand(K_paths) < pu_vec,
-    #                               np.matmul(String_vec, self.AuAu),
-    #                               np.matmul(String_vec, self.AdAd))
-    #
-    #
-    #         if np.random.rand() < pu:
-    #             # spin-up sampled
-    #             p_cond = pu_cond #pu
-    #             String = np.matmul(String, self.AuAu)
-    #             samples[n] = 1
-    #         else:
-    #             # spin-down sampled
-    #             p_cond = p_cond-pu_cond #1-pu
-    #             String = np.matmul(String, self.AdAd)
-    #             samples[n] = 0
-    #
-    #         samples[k, :] = samples
-    #
-    #     return samples
-
 
     def corr_by_time_avr(self, samples):
         print('Running corr_by_time_avr')
         sample_mean = samples.mean(axis=1)
-        print('sample_mean over paths:', samples.mean(axis=0))
-        print('sample_mean over nodes:', samples.mean(axis=1))
-
+        #print('sample_mean over paths:', samples.mean(axis=0))
 
         #samples = samples - sample_mean[:, np.newaxis]  # remove the mean
         #sample_mean = samples.mean()
@@ -169,12 +103,22 @@ class MPS_Sampler():
         sample_corr = np.zeros([K_paths, max_r])
 
         for r in range(max_r):
+            if (r < 1000 and r % 100 == 0) or (r >= 1000 and r % 500 == 0):
+                print('r:', r)
             overlap = samples[:, :N_spins - r] * samples[:, r:]
             sample_corr[:, r] = np.mean(overlap, axis=1)  # over time dimension
 
         corr = np.mean(sample_corr, axis=0)
         error = np.std(sample_corr, axis=0) / np.sqrt(K_paths)
         return corr, error
+
+    def magnetization_by_time_avr(self, samples):
+        tot_magn = samples.mean(axis=1)
+        plt.figure(10)
+        plt.title('Distribution of total magnetization (after transient), xi:'+ str(round(self.xi, 4)))
+        plt.hist(tot_magn, bins=100)
+        #print('sample_mean total magnetization:', samples.mean(axis=1))
+        return
 
 
     def corr_by_ensemble_avr(self, samples):
@@ -204,27 +148,54 @@ class MPS_Clibrator():
 
 
 if __name__ == '__main__':
+    np.random.seed(104) #104: xi=5.27
 
-    if 1:  # Sampling
+    if 0:  # Sampling
         outfile = 'MPS_M_dump'
         npzfile = np.load(outfile + '.npz')
         M_tensor = npzfile['M']
         print('M shape:', M_tensor.shape)
 
-    else:  # test case:
-        eps = 0.2
+    elif 0:  # test case:
+        eps = 0.1
         Au = np.array([[1, 0], [eps, 0]])
         Ad = np.array([[0, eps], [0, 1]])
         M_tensor = np.array([Au, Ad])
 
-    np.random.seed(100)
-    sampler = MPS_Sampler(M_tensor)
+    elif 0:
+        eps = 0.8
+        Au = np.array([[1, 0], [eps, 0]])
+        Ad = np.array([[0, eps], [0, 0]])
+        M_tensor = np.array([Au, Ad])
 
-    N_spins = 10
-    K_paths = 500
-    # samples = sampler.generate_vec(N_spins, K_paths)
-    samples = sampler(N_spins, K_paths)
-    print('samples', samples)
+    else:
+        Au = np.random.randn(2,2)
+        Ad = np.random.randn(2,2)
+        print('M:', Au, Ad)
+        M_tensor = np.array([Au, Ad])
+
+
+    sampler = MPS_Sampler(M_tensor)
+    #exit()
+
+
+    print('###### Sampling: ##############################################')
+    transient_size = round(5 * sampler.xi)
+    print('transient_size:', transient_size)
+    N_spins = 100
+    K_paths = 5000
+    samples = sampler(transient_size + N_spins, K_paths)
+
+    samples = samples[:, transient_size:] # remove transient
+    print('After removing transient, samples.shape:', samples.shape)
+    #print('After removing transient, samples', samples)
+
+
+    print('###### Analysis: ##############################################')
+    sampler.magnetization_by_time_avr(samples)
+    if 1:
+        plt.show()
+        exit()
 
     # save to disk:
     np.save('samples.npy', samples)  # save
@@ -234,29 +205,33 @@ if __name__ == '__main__':
     #print('corr:', corr)
 
     plt.figure(1)
-    # plt.plot(np.array([3,4,8,7]))
     plt.loglog(abs(corr), '-k.')
     plt.loglog(error, '-r.')
     x, y = sampler.corr_exp_decay()
     plt.loglog(x, corr[0]*y, '-g.')
-    plt.show()
 
-    exit()
+    if 1:
+        plt.show()
+        exit()
 
     sample_corr = sampler.correlations(samples)
     print('sample_corr:', sample_corr)
 
-    samples2 = sampler(N_spins, K_paths)
-    sample_corr2 = sampler.correlations(samples2)
+    #samples2 = sampler(N_spins, K_paths)
+    #sample_corr2 = sampler.correlations(samples2)
 
-    samples3 = sampler(N_spins, K_paths)
-    sample_corr3 = sampler.correlations(samples3)
+    #samples3 = sampler(N_spins, K_paths)
+    #sample_corr3 = sampler.correlations(samples3)
 
     plt.figure(2)
-    # plt.plot(np.array([3,4,8,7]))
-    plt.loglog(np.abs(sample_corr), '-k.')
-    plt.loglog(np.abs(sample_corr2), 'b.')
-    plt.loglog(np.abs(sample_corr3), 'r.')
+    if 1:
+        plt.semilogy(np.abs(sample_corr), '-k.')
+        #plt.semilogy(np.abs(sample_corr2), 'b.')
+        #plt.semilogy(np.abs(sample_corr3), 'r.')
+    else:
+        plt.loglog(np.abs(sample_corr), '-k.')
+        #plt.loglog(np.abs(sample_corr2), 'b.')
+        #plt.loglog(np.abs(sample_corr3), 'r.')
 
 print('--- The End ---')
 plt.show()
