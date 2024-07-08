@@ -9,12 +9,15 @@ import matplotlib.pyplot as plt
 #from mpl_toolkits.axes_grid1 import make_axes_locatable
 #import datetime
 from scipy.linalg import eig
+from scipy.stats import norm
 #import tensorflow_probability as tfp
 #import pandas as pd
 
 
 
 class MPS_Sampler():
+
+    #-------------------------------------------------------------------------------------------------------------------
     def __init__(self, M_tensor):
         self.M = M_tensor
         self.Au = self.M[0]
@@ -43,23 +46,31 @@ class MPS_Sampler():
         self.LR = np.dot(self.L, self.R)
         self.xi = 1/np.log(np.abs(w[indices[-1]] / w[indices[-2]]))
 
+        self.loglikelihood = 0
+
         print('self.LR', self.LR)
         print('leading eig:\n', self.lam, self.L, self.R)
         print('correlation length: ', self.xi)
 
 
+    #-------------------------------------------------------------------------------------------------------------------
     def __call__(self, N_spins, K_paths):
         print('Running sampling')
         samples = -np.ones((K_paths, N_spins))
         rands = np.random.rand(K_paths, N_spins)
         AuAuR = np.matmul(self.AuAu, self.R) / self.LR
         AdAdR = np.matmul(self.AdAd, self.R) / self.LR
+
         pus = -np.ones(N_spins)
+        b_len = 4
+        b_pu = -np.ones([N_spins, 2])
+        loglikelihood = 0
 
         for k in range(K_paths):
             if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 200 == 0):
                 print('Path:', k)
             String = self.L
+
             for n in range(N_spins):
                 String_AuAuR = np.matmul(String, AuAuR)
                 String_AdAdR = np.matmul(String, AdAdR)  # decreasing exponentially!
@@ -70,14 +81,20 @@ class MPS_Sampler():
                     pus[n] = pu
                     print('n:', n, 'formers:', samples[k, n-3:n], 'pu:', pu)
 
+                    if n >= b_len:
+                        b = samples[k, n - b_len : n]
+                        b_int = b.dot(2 ** np.arange(b.size)[::-1]) + 0.005 * 2**b_len * np.random.randn()
+                        b_pu[n] = [b_int, pu + 0.005 * np.random.randn()]
 
 
                 if rands[k, n] < pu:  # spin-up sampled
                     samples[k, n] = 1
                     String = np.matmul(String, self.AuAu)
+                    loglikelihood += np.log(pu)
                 else:  # spin-down sampled
                     samples[k, n] = 0
                     String = np.matmul(String, self.AdAd)
+                    loglikelihood += np.log(1 - pu)
 
             if k==0:
                 plt.figure(101)
@@ -85,17 +102,32 @@ class MPS_Sampler():
                 plt.hist(pus, bins=100)
                 plt.pause(0.1)
 
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(4, 8))
+                ax1.hist(pus, bins=100, density=False)
+                ax1.set_title('Distribution of pu probabilities in 1st path')
+                ax1.set_xlabel('p_u')
+                ax1.set_ylabel('Density')
+
+                b_pu = b_pu[b_len:]
+                ax2.plot(b_pu[:,0], b_pu[:,1], 'b.')
+                plt.pause(0.1)
+
+
             #exit()
+
+        self.loglikelihood = loglikelihood / (K_paths * N_spins)
+
         return samples
 
     def corr_by_time_avr(self, samples):
         print('Running corr_by_time_avr')
         sample_mean = samples.mean(axis=1)
-        #print('sample_mean over paths:', samples.mean(axis=0))
 
+        #print('sample_mean over paths:', samples.mean(axis=0))
         #samples = samples - sample_mean[:, np.newaxis]  # remove the mean
         #sample_mean = samples.mean()
-        print('sample_mean:', sample_mean)
+
+        #print('sample_mean:', sample_mean)
         samples = samples - 0.5 #sample_mean  # remove the mean
 
         K_paths, N_spins = samples.shape
@@ -103,7 +135,7 @@ class MPS_Sampler():
         sample_corr = np.zeros([K_paths, max_r])
 
         for r in range(max_r):
-            if (r < 1000 and r % 100 == 0) or (r >= 1000 and r % 500 == 0):
+            if (r < 1000 and r % 10 == 0) or (r >= 1000 and r % 100 == 0):
                 print('r:', r)
             overlap = samples[:, :N_spins - r] * samples[:, r:]
             sample_corr[:, r] = np.mean(overlap, axis=1)  # over time dimension
@@ -114,22 +146,39 @@ class MPS_Sampler():
 
     def magnetization_by_time_avr(self, samples):
         tot_magn = samples.mean(axis=1)
+
         plt.figure(10)
         plt.title('Distribution of total magnetization (after transient), xi:'+ str(round(self.xi, 4)))
-        plt.hist(tot_magn, bins=100)
+
+        M_mean = np.mean(tot_magn)
+        M_std = np.std(tot_magn)
+        xx = np.linspace(0,1,1000)
+        yy = norm.pdf(xx, M_mean, M_std)
+
+        #data = np.random.normal(M_mean, M_std, 1000)
+        #print(tot_magn[:10])
+        #print(data[: 10])
+
+        tot_magn += M_std/50 * np.random.randn(len(tot_magn)) # adding some noise for stability
+        plt.hist(tot_magn, bins=100, density=True)
+
+        # Plotting the result to visualize
+        plt.plot(xx, yy)
+        plt.xlabel('tot magn')
+        plt.ylabel('PDF')
+        plt.grid(True)
+
         #print('sample_mean total magnetization:', samples.mean(axis=1))
         return
-
 
     def corr_by_ensemble_avr(self, samples):
 
         return
 
-    def corr_exp_decay(self):
-        x = np.linspace(0, 10, 20)
+    def corr_exp_decay(self, r_max):
+        x = np.linspace(0, r_max, 50)
         y = np.exp(-x / self.xi)
         return x, y
-
 
     def correlations(self, samples):
         samples = samples - 0.5
@@ -142,21 +191,17 @@ class MPS_Sampler():
         return corr
 
 
-class MPS_Clibrator():
-    def __init__(self, series):
-        return
-
-
+#=======================================================================================================================
 if __name__ == '__main__':
     np.random.seed(104) #104: xi=5.27
 
     if 0:  # Sampling
-        outfile = 'MPS_M_dump'
+        outfile = 'MPS_calibrator_M_dump_seed104' #'MPS_M_dump'
         npzfile = np.load(outfile + '.npz')
         M_tensor = npzfile['M']
         print('M shape:', M_tensor.shape)
 
-    elif 0:  # test case:
+    elif 1:  # test case:
         eps = 0.1
         Au = np.array([[1, 0], [eps, 0]])
         Ad = np.array([[0, eps], [0, 1]])
@@ -179,39 +224,43 @@ if __name__ == '__main__':
     #exit()
 
 
-    print('###### Sampling: ##############################################')
-    transient_size = round(5 * sampler.xi)
+
+    print('\nSampling: ###############################################################################################')
+    transient_size = 0 #round(5 * sampler.xi)
     print('transient_size:', transient_size)
     N_spins = 100
-    K_paths = 5000
+    K_paths = 100
     samples = sampler(transient_size + N_spins, K_paths)
+
+    # save to disk:
+    np.save('samples.npy', samples)  # save
+
+    print('Average loglikelihood:', sampler.loglikelihood)
 
     samples = samples[:, transient_size:] # remove transient
     print('After removing transient, samples.shape:', samples.shape)
     #print('After removing transient, samples', samples)
 
 
-    print('###### Analysis: ##############################################')
+    print('\nAnalysis:  ##############################################################################################')
     sampler.magnetization_by_time_avr(samples)
-    if 1:
+    if 0:
         plt.show()
         exit()
-
-    # save to disk:
-    np.save('samples.npy', samples)  # save
-    ### samples = np.load('samples.npy')  # load
 
     corr, error = sampler.corr_by_time_avr(samples)
     #print('corr:', corr)
 
     plt.figure(1)
-    plt.loglog(abs(corr), '-k.')
-    plt.loglog(error, '-r.')
-    x, y = sampler.corr_exp_decay()
-    plt.loglog(x, corr[0]*y, '-g.')
+    plt.semilogy(abs(corr), '-k.')
+    plt.semilogy(error, '-r.')
+    x, y = sampler.corr_exp_decay(len(corr))
+    plt.semilogy(x, corr[0]*y, '-g.')
 
     if 1:
+        print('--- The End #34 ---')
         plt.show()
+
         exit()
 
     sample_corr = sampler.correlations(samples)
