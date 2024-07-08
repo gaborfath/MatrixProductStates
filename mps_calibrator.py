@@ -280,7 +280,7 @@ class MPSCalibrator(Model):
 
         for k in range(K_paths):
             #if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 200 == 0):
-            #print('Path:', k)
+            print('Path:', k, K_paths)
 
             String = EN
 
@@ -333,7 +333,7 @@ class MPSCalibrator(Model):
         self.color = color
         sh = np.shape(self.A0)
         start = tf.convert_to_tensor(np.reshape(self.A0, sh[0] * sh[1] * sh[2]))  # Starting point for the search.
-        #print('start:\n', start)
+        print('start:\n', start)
         #initial_value, initial_grad = self.targetfunction_and_gradient(start)
         #print('Initial value:', initial_value)
         #print('Initial gradient:', initial_grad)
@@ -360,6 +360,7 @@ if __name__ == '__main__':
 
     # load samples
     samples = np.load('samples.npy')
+    
 
     k = 10  # -> N = 2 + 2**k # only works with these N values
     N = 2 + 2 ** k
@@ -373,7 +374,7 @@ if __name__ == '__main__':
     for i in range(8):
         axs.append(fig1.add_subplot(2, 4, i + 1))
 
-    chi = 8  # starting value 4
+    chi = 2  # starting value 4
     grad_tolerance = 1.e-4
 
     A0 = np.random.randn(2, chi, chi)  # 2 => up, down
