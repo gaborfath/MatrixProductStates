@@ -122,18 +122,23 @@ class MPS_comparator():
 
     #-------------------------------------------------------------------------------------------------------------------
     def visualize(self, pus_1, pus_2, noise):
-        print('\nPlotting...')
+        #print('\nPlotting...')
 
         # adding noise for visualization
         pus_1 = pus_1 + noise * np.random.randn(*pus_1.shape)
         pus_2 = pus_2 + noise * np.random.randn(*pus_2.shape)
 
         plt.figure(201, figsize=(4,4))
-        plt.plot(pus_1[0,:], pus_2[0,:], '.')
+        plt.clf()
+        colors = ['b', 'r', 'g', 'm']
+        num_sample_to_visualize = 4
+        for i in range(min(num_sample_to_visualize, pus_1.shape[0])):
+            plt.plot(pus_1[i, :], pus_2[i, :], marker='.', linestyle='', color=colors[i])
+
         plt.plot([0,1], [0,1], 'r--')
 
-        plt.xlabel('$p_{up}^{MPS1}$')
-        plt.ylabel('$p_{up}^{MPS2}$')
+        plt.xlabel('$p_{up}^{Target}$')
+        plt.ylabel('$p_{up}^{Model}$')
         #plt.pause(0.1)
 
         return
@@ -143,39 +148,48 @@ if __name__ == '__main__':
 
     print('\nInputs:  ##################################################################################################')
     # Input the dataset and the two MPS tensors to compare
-    np.random.seed(104)
+
+    np.set_printoptions(precision=3)
 
     # Dataset:
-    samples = np.load('samples.npy')
+    datafile = 'samples.npy'
+    samples = np.load(datafile)
     print('samples.shape:', samples.shape, '\n')
 
-    # MPS_1:
-    if 1:
-        file1 = 'MPS_calibrator_M_dump_seed104' #'MPS_M_dump'
+    # MPS_1 (Target):
+    if 0:
+        file1 = 'MPS_calibrator_M_dump' #'MPS_M_dump' 'MPS_calibrator_M_dump_seed104'
         npzfile = np.load(file1 + '.npz')
         M_tensor1 = npzfile['M']
-    else:
-        Au = np.random.randn(2,2)
-        Ad = np.random.randn(2,2)
-        print('M1:', Au, Ad)
-        M_tensor1 = np.array([Au, Ad])
-    print('M1.shape:', M_tensor1.shape)
-
-    # MSP_":
-    if 0:
-        file2 = 'MPS_calibrator_M_dump_seed104' #'MPS_M_dump'
-        npzfile = np.load(file2 + '.npz')
-        M_tensor2 = npzfile['M']
     elif 0:
         eps = 0.1
         Au = np.array([[1, 0], [eps, 0]])
         Ad = np.array([[0, eps], [0, 1]])
-        M_tensor = np.array([Au, Ad])
+        M_tensor1 = np.array([Au, Ad])
     else:
+        np.random.seed(104)
         Au = np.random.randn(2,2)
         Ad = np.random.randn(2,2)
-        print('M2:', Au, Ad)
+        M_tensor1 = np.array([Au, Ad])
+    print('M1 (Target):\n', M_tensor1[0], '\n', M_tensor1[1])
+    print('M1.shape:', M_tensor1.shape)
+
+    # MSP_2 (Model):
+    if 1:
+        file2 = 'MPS_calibrator_M_currentbest' #'MPS_M_dump' 'MPS_calibrator_M_dump_seed104'
+        npzfile = np.load(file2 + '.npz')
+        M_tensor2 = npzfile['M']
+    elif 1:
+        eps = 0.1
+        Au = np.array([[1, 0], [eps, 0]])
+        Ad = np.array([[0, eps], [0, 1]])
         M_tensor2 = np.array([Au, Ad])
+    else:
+        np.random.seed(104)
+        Au = np.random.randn(2,2)
+        Ad = np.random.randn(2,2)
+        M_tensor2 = np.array([Au, Ad])
+    print('M2 (Model):\n', M_tensor2[0], '\n', M_tensor2[1])
     print('M2.shape:', M_tensor2.shape)
 
 
@@ -184,7 +198,7 @@ if __name__ == '__main__':
 
     comparator = MPS_comparator(M_tensor1, M_tensor2)
     pus_1, pus_2 = comparator.compare(samples)
-    comparator.visualize(pus_1, pus_2, noise=0.02)
+    comparator.visualize(pus_1, pus_2, noise=0.01)
 
     plt.show()
     exit()

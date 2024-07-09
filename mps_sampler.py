@@ -48,23 +48,28 @@ class MPS_Sampler():
 
         self.loglikelihood = 0
 
-        print('self.LR', self.LR)
-        print('leading eig:\n', self.lam, self.L, self.R)
-        print('correlation length: ', self.xi)
+        #print('self.LR', self.LR)
+        #print('leading eig:\n', self.lam, self.L, self.R)
+        #print('correlation length: ', self.xi)
+        print('Eigs:', w)
+        print('Lam1:', self.lam, 'xi:', self.xi)
+        print('')
 
 
     #-------------------------------------------------------------------------------------------------------------------
     def __call__(self, N_spins, K_paths):
-        print('Running sampling')
+
+        # print('Running sampling')
         samples = -np.ones((K_paths, N_spins))
         rands = np.random.rand(K_paths, N_spins)
         AuAuR = np.matmul(self.AuAu, self.R) / self.LR
         AdAdR = np.matmul(self.AdAd, self.R) / self.LR
 
         pus = -np.ones(N_spins)
-        b_len = 4
+        b_len = 8
         b_pu = -np.ones([N_spins, 2])
         loglikelihood = 0
+        naive_model_loglikelihood = 0  # naive_model: all probs are 1/2
 
         for k in range(K_paths):
             if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 200 == 0):
@@ -74,12 +79,13 @@ class MPS_Sampler():
             for n in range(N_spins):
                 String_AuAuR = np.matmul(String, AuAuR)
                 String_AdAdR = np.matmul(String, AdAdR)  # decreasing exponentially!
-                #print('hah:', k, 'n:', n, String_AuAuR, String_AdAdR)
                 pu =  String_AuAuR / (String_AuAuR + String_AdAdR)
+                #print('hah:', k, 'n:', n, String_AuAuR, String_AdAdR, 'pu:', pu)
 
+                # Check empirically if series is Markov:
                 if k==0:
                     pus[n] = pu
-                    print('n:', n, 'formers:', samples[k, n-3:n], 'pu:', pu)
+                    #print('n:', n, 'formers:', samples[k, n-3:n], 'pu:', pu)
 
                     if n >= b_len:
                         b = samples[k, n - b_len : n]
@@ -91,18 +97,17 @@ class MPS_Sampler():
                     samples[k, n] = 1
                     String = np.matmul(String, self.AuAu)
                     loglikelihood += np.log(pu)
+                    naive_model_loglikelihood += np.log(0.5)
                 else:  # spin-down sampled
                     samples[k, n] = 0
                     String = np.matmul(String, self.AdAd)
                     loglikelihood += np.log(1 - pu)
+                    naive_model_loglikelihood += np.log(0.5)
+                if n % 10 == 0:
+                    String = String / np.linalg.norm(String)  # safe and enough to renormalize here
 
             if k==0:
-                plt.figure(101)
-                plt.title('Distribution of pu probabilities in 1st path')
-                plt.hist(pus, bins=100)
-                plt.pause(0.1)
-
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(4, 8))
+                fig, (ax1, ax2) = plt.subplots(2, 1, num=101, figsize=(4, 8))
                 ax1.hist(pus, bins=100, density=False)
                 ax1.set_title('Distribution of pu probabilities in 1st path')
                 ax1.set_xlabel('p_u')
@@ -110,12 +115,12 @@ class MPS_Sampler():
 
                 b_pu = b_pu[b_len:]
                 ax2.plot(b_pu[:,0], b_pu[:,1], 'b.')
+                ax2.set_title('Markov property check for 1st path')
                 plt.pause(0.1)
 
 
-            #exit()
-
         self.loglikelihood = loglikelihood / (K_paths * N_spins)
+        self.naive_model_loglikelihood = naive_model_loglikelihood / (K_paths * N_spins)
 
         return samples
 
@@ -193,56 +198,65 @@ class MPS_Sampler():
 
 #=======================================================================================================================
 if __name__ == '__main__':
-    np.random.seed(104) #104: xi=5.27
 
-    if 0:  # Sampling
+    print('\nInputs:  ################################################################################################')
+
+    N_spins = 1000
+    K_paths = 10
+    transient_multiplier = 0  # transient_size = transient_multiplier * sampler.xi
+    outfile = 'samples.npy'
+
+    # Define MPS tensor to sample from:
+    np.random.seed(104) #104: xi=5.27
+    if 0:
         outfile = 'MPS_calibrator_M_dump_seed104' #'MPS_M_dump'
         npzfile = np.load(outfile + '.npz')
         M_tensor = npzfile['M']
         print('M shape:', M_tensor.shape)
-
-    elif 1:  # test case:
+    elif 0:  # test case:
         eps = 0.1
         Au = np.array([[1, 0], [eps, 0]])
         Ad = np.array([[0, eps], [0, 1]])
         M_tensor = np.array([Au, Ad])
-
+        dumpM_file = 'M_tensor_eps01'
     elif 0:
         eps = 0.8
         Au = np.array([[1, 0], [eps, 0]])
         Ad = np.array([[0, eps], [0, 0]])
         M_tensor = np.array([Au, Ad])
-
     else:
         Au = np.random.randn(2,2)
         Ad = np.random.randn(2,2)
         print('M:', Au, Ad)
         M_tensor = np.array([Au, Ad])
+        dumpM_file = 'M_tensor_seed104'
+    np.savez(dumpM_file, M=M_tensor)
 
-
-    sampler = MPS_Sampler(M_tensor)
-    #exit()
-
+    print('N_spins', N_spins, 'K_paths', K_paths, 'transient_multiplier:', transient_multiplier)
+    print('M_tensor.shape:', M_tensor.shape)
+    print('M_tensor was dumped in:', dumpM_file)
 
 
     print('\nSampling: ###############################################################################################')
-    transient_size = 0 #round(5 * sampler.xi)
-    print('transient_size:', transient_size)
-    N_spins = 100
-    K_paths = 100
+
+    # sampling:
+    sampler = MPS_Sampler(M_tensor)
+    transient_size = transient_multiplier * round(5 * sampler.xi)
     samples = sampler(transient_size + N_spins, K_paths)
+    samples = samples[:, transient_size:]  # remove transient
+    print('After removing', transient_multiplier,'*xi transients remaining samples.shape:', samples.shape)
+    print('Average sampled loglikelihood:', sampler.loglikelihood)
+    print('Naive model loglikelihood:', sampler.naive_model_loglikelihood)
 
-    # save to disk:
-    np.save('samples.npy', samples)  # save
-
-    print('Average loglikelihood:', sampler.loglikelihood)
-
-    samples = samples[:, transient_size:] # remove transient
-    print('After removing transient, samples.shape:', samples.shape)
-    #print('After removing transient, samples', samples)
+    # saving to disk:
+    np.save(outfile, samples)
+    print('Samples dumped in to', outfile)
 
 
     print('\nAnalysis:  ##############################################################################################')
+
+
+
     sampler.magnetization_by_time_avr(samples)
     if 0:
         plt.show()
