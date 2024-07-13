@@ -57,16 +57,17 @@ class MPS_Sampler():
 
 
     #-------------------------------------------------------------------------------------------------------------------
-    def __call__(self, N_spins, K_paths):
+    def __call__(self, N_spins, K_paths, visualization_noise):
 
         # print('Running sampling')
         samples = -np.ones((K_paths, N_spins))
+        sample_probs = -np.ones((K_paths, N_spins))
         rands = np.random.rand(K_paths, N_spins)
         AuAuR = np.matmul(self.AuAu, self.R) / self.LR
         AdAdR = np.matmul(self.AdAd, self.R) / self.LR
 
         pus = -np.ones(N_spins)
-        b_len = 8
+        b_len = 3
         b_pu = -np.ones([N_spins, 2])
         loglikelihood = 0
         naive_model_loglikelihood = 0  # naive_model: all probs are 1/2
@@ -80,17 +81,18 @@ class MPS_Sampler():
                 String_AuAuR = np.matmul(String, AuAuR)
                 String_AdAdR = np.matmul(String, AdAdR)  # decreasing exponentially!
                 pu =  String_AuAuR / (String_AuAuR + String_AdAdR)
+                sample_probs[k, n] = pu
                 #print('hah:', k, 'n:', n, String_AuAuR, String_AdAdR, 'pu:', pu)
 
                 # Check empirically if series is Markov:
                 if k==0:
                     pus[n] = pu
-                    #print('n:', n, 'formers:', samples[k, n-3:n], 'pu:', pu)
+                    print('n:', n, 'formers:', samples[k, n-3:n], 'pu:', pu)
 
                     if n >= b_len:
                         b = samples[k, n - b_len : n]
-                        b_int = b.dot(2 ** np.arange(b.size)[::-1]) + 0.005 * 2**b_len * np.random.randn()
-                        b_pu[n] = [b_int, pu + 0.005 * np.random.randn()]
+                        b_int = b.dot(2 ** np.arange(b.size)[::-1]) + visualization_noise * 2**b_len * np.random.randn()
+                        b_pu[n] = [b_int, pu + visualization_noise * np.random.randn()]
 
 
                 if rands[k, n] < pu:  # spin-up sampled
@@ -114,6 +116,12 @@ class MPS_Sampler():
                 ax1.set_ylabel('Density')
 
                 b_pu = b_pu[b_len:]
+                unique, counts = np.unique(np.round(b_pu[:, 1], 10), return_counts=True)
+                with np.printoptions(precision=6, suppress=True, threshold=np.inf):
+                    print('b_pu: uniques | counts:')
+                    print(np.asarray((unique, counts)).T)
+
+
                 ax2.plot(b_pu[:,0], b_pu[:,1], 'b.')
                 ax2.set_title('Markov property check for 1st path')
                 plt.pause(0.1)
@@ -122,7 +130,7 @@ class MPS_Sampler():
         self.loglikelihood = loglikelihood / (K_paths * N_spins)
         self.naive_model_loglikelihood = naive_model_loglikelihood / (K_paths * N_spins)
 
-        return samples
+        return samples, sample_probs
 
     def corr_by_time_avr(self, samples):
         print('Running corr_by_time_avr')
@@ -140,7 +148,7 @@ class MPS_Sampler():
         sample_corr = np.zeros([K_paths, max_r])
 
         for r in range(max_r):
-            if (r < 1000 and r % 10 == 0) or (r >= 1000 and r % 100 == 0):
+            if (r < 1000 and r % 100 == 0) or (r >= 1000 and r % 100 == 0):
                 print('r:', r)
             overlap = samples[:, :N_spins - r] * samples[:, r:]
             sample_corr[:, r] = np.mean(overlap, axis=1)  # over time dimension
@@ -150,7 +158,32 @@ class MPS_Sampler():
         return corr, error
 
     def magnetization_by_time_avr(self, samples):
+
+        bs = -np.ones(samples.shape[0])
+        for k in range(samples.shape[0]):
+            b = samples[k, :]
+            b_int = b.dot(2 ** np.arange(b.size)[::-1])
+            bs[k] = b_int
+
+        unique, counts = np.unique(bs, return_counts=True)
+        desc = ['{0:b}'.format(n) for n in unique.astype(int)] # ['{0:b}'.format(n) for n in range(samples.shape[1])]
+        print(unique.astype(int), desc, counts)
+        print('bs:\n', np.asarray((unique.astype(int), desc, counts)).T) #['00', '01', '10', '11']
+
+        print('pu=', (counts[2]+counts[3])/(np.sum(counts)), 'puu=', counts[3]/(counts[2]+counts[3]),
+              'pdu=', counts[1]/(counts[0]+counts[1]))
+        #
+        # print('00', np.array([0, 0]).dot(2 ** np.arange(2)[::-1]))
+        # print('01', np.array([0, 1]).dot(2 ** np.arange(2)[::-1]))
+        # print('10', np.array([1, 0]).dot(2 ** np.arange(2)[::-1]))
+        # print('11', np.array([1, 1]).dot(2 ** np.arange(2)[::-1]))
+
         tot_magn = samples.mean(axis=1)
+
+        # unique, counts = np.unique(np.round(b_pu[:, 1], 10), return_counts=True)
+        # with np.printoptions(precision=6, suppress=True, threshold=np.inf):
+        #     print('b_pu: uniques | counts:')
+        #     print(np.asarray((unique, counts)).T)
 
         plt.figure(10)
         plt.title('Distribution of total magnetization (after transient), xi:'+ str(round(self.xi, 4)))
@@ -201,10 +234,11 @@ if __name__ == '__main__':
 
     print('\nInputs:  ################################################################################################')
 
-    N_spins = 1000
-    K_paths = 10
+    N_spins = 5
+    K_paths = 1000
     transient_multiplier = 0  # transient_size = transient_multiplier * sampler.xi
-    outfile = 'samples.npy'
+    samples_file = 'samples.npy'
+    M_tensor_file = 'M_tensor'
 
     # Define MPS tensor to sample from:
     np.random.seed(104) #104: xi=5.27
@@ -224,13 +258,25 @@ if __name__ == '__main__':
         Au = np.array([[1, 0], [eps, 0]])
         Ad = np.array([[0, eps], [0, 0]])
         M_tensor = np.array([Au, Ad])
+    elif 0:
+        Au = np.array([[1,   0,   0],
+                       [1.7, 0,   0],
+                       [2.3, 0, 0]])
+        Ad = np.array([[0,  0,  2.3],
+                       [0,  0,  1.7], # 4-sate, 4-leg Markov -NO ??
+                       [0,  0,  1]])
+        M_tensor = np.array([Au, Ad])
+        dumpM_file = 'M_tensor_33'
     else:
         Au = np.random.randn(2,2)
         Ad = np.random.randn(2,2)
         print('M:', Au, Ad)
         M_tensor = np.array([Au, Ad])
         dumpM_file = 'M_tensor_seed104'
-    np.savez(dumpM_file, M=M_tensor)
+
+    # Dump M_tensor used for sampling:
+    np.savez(dumpM_file, M=M_tensor)     # specific file, always the same, and has specific name
+    np.savez(M_tensor_file, M=M_tensor)  # general file, always different
 
     print('N_spins', N_spins, 'K_paths', K_paths, 'transient_multiplier:', transient_multiplier)
     print('M_tensor.shape:', M_tensor.shape)
@@ -242,15 +288,18 @@ if __name__ == '__main__':
     # sampling:
     sampler = MPS_Sampler(M_tensor)
     transient_size = transient_multiplier * round(5 * sampler.xi)
-    samples = sampler(transient_size + N_spins, K_paths)
+    samples, sample_probs = sampler(transient_size + N_spins, K_paths, visualization_noise=0.0)
     samples = samples[:, transient_size:]  # remove transient
     print('After removing', transient_multiplier,'*xi transients remaining samples.shape:', samples.shape)
-    print('Average sampled loglikelihood:', sampler.loglikelihood)
-    print('Naive model loglikelihood:', sampler.naive_model_loglikelihood)
+    if 1:
+        print('Samples:\n', samples)
+
+    print('\nAverage sampled loglikelihood:', sampler.loglikelihood)
+    print('Naive p=0.5 model loglikelihood:', sampler.naive_model_loglikelihood)
 
     # saving to disk:
-    np.save(outfile, samples)
-    print('Samples dumped in to', outfile)
+    np.save(samples_file, [samples, sample_probs])
+    print('\nSamples dumped in to', samples_file)
 
 
     print('\nAnalysis:  ##############################################################################################')

@@ -198,7 +198,7 @@ if __name__ == '__main__':
 
     comparator = MPS_comparator(M_tensor1, M_tensor2)
     pus_1, pus_2 = comparator.compare(samples)
-    comparator.visualize(pus_1, pus_2, noise=0.01)
+    comparator.visualize(pus_1, pus_2, noise=0.0)
 
     plt.show()
     exit()

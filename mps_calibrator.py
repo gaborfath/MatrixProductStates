@@ -281,8 +281,8 @@ class MPSCalibrator(Model):
         loglikelihood = 0
 
         for k in range(K_paths):
-            if (k < 1000 and k % 10 == 0) or (k >= 1000 and k % 100 == 0):
-                print('Path:', k, K_paths)
+            if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 100 == 0):
+                print('\nPath:', k, K_paths)
 
             String = EN
 
@@ -293,15 +293,20 @@ class MPSCalibrator(Model):
                 tr_d = tf.linalg.trace(String_AAd)
                 pu =  tr_u / (tr_u + tr_d)
                 pd = tr_d / (tr_u + tr_d)
-                #print('p:', pu, pd, tf.math.log(pu), tf.math.log(pd))
+                if (k % 100 == 0):
+                    print('n:', n, 'p:', pu.numpy(), pd.numpy(), tf.math.log(pu).numpy(), tf.math.log(pd).numpy())
 
                 if samples[k, n] == 1:  # spin-up sampled
                     loglikelihood += tf.math.log(pu)
+                    if (k % 100 == 0):
+                        print('s: 1', loglikelihood.numpy())
                     String = tf.matmul(String, AAu)
                     norm = tf.linalg.trace(String)
                     String = String / norm
                 else:  # spin-down sampled
                     loglikelihood += tf.math.log(pd)
+                    if (k % 100 == 0):
+                        print('s: 0', loglikelihood.numpy())
                     String = tf.matmul(String, AAd)
                     norm = tf.linalg.trace(String)
                     String = String / norm
@@ -310,6 +315,9 @@ class MPSCalibrator(Model):
         loglikelihood = loglikelihood / (K_paths * N_spins)
 
         if loglikelihood.numpy() > self.max_loglikelihood:
+
+            print('A:\n', A)
+
             self.max_loglikelihood = loglikelihood.numpy()
             outfile_currentbest = 'MPS_calibrator_M_currentbest'
             np.savez(outfile_currentbest, M=A)
@@ -317,16 +325,21 @@ class MPSCalibrator(Model):
 
             # To compare with known target M on the fly:
             if 1:
-                M_target_file = 'M_tensor_seed104'  # 'M_tensor_eps01'
+                M_target_file = 'M_tensor'  # 'M_tensor_eps01' 'M_tensor_seed104' 'M_tensor'
                 npzfile = np.load(M_target_file + '.npz')
                 M_target = npzfile['M']
+                print('M_target:\n', M_target)
 
                 npzfile = np.load(outfile_currentbest + '.npz')
                 M_model = npzfile['M']
+                print('M_model:\n', M_model)
 
                 comparator = mps_comparator.MPS_comparator(M_target, M_model)
                 pus_1, pus_2 = comparator.compare(samples)
-                comparator.visualize(pus_1, pus_2, noise=0.01)
+                comparator.visualize(pus_1, pus_2, noise=0.0)
+
+                #plt.show()
+                #exit()
 
 
         return -loglikelihood  # negative likelihood to minimize = likelihood to maximize
@@ -352,11 +365,12 @@ class MPSCalibrator(Model):
         self.color = color
         sh = np.shape(self.A0)
         start = tf.convert_to_tensor(np.reshape(self.A0, sh[0] * sh[1] * sh[2]))  # Starting point for the search.
-        if 0:
+        if 1:
             print('start:\n', start)
-            #initial_value, initial_grad = self.targetfunction_and_gradient(start)
-            #print('Initial value:', initial_value)
-            #print('Initial gradient:', initial_grad)
+            initial_value, initial_grad = self.targetfunction_and_gradient(start)
+            print('Initial value:', initial_value)
+            print('Initial gradient:', initial_grad, 'norm:', tf.norm(initial_grad).numpy())
+            #exit()
 
         optim_results = tfp.optimizer.bfgs_minimize(
             self.targetfunction_and_gradient, initial_position=start, parallel_iterations=1,
@@ -382,9 +396,9 @@ if __name__ == '__main__':
 
 
     # Calibration parameters:
-    chi = 4  # starting value 4
+    chi = 2  # starting value 4
     grad_tolerance = 1.e-6
-    learning_rate = 0.04  # 0.001 default - no impact for BFGS
+    learning_rate = 0.01  # 0.001 default - no impact for BFGS
 
     # Samples to calibrate to:
     datafile = 'samples.npy'
@@ -395,7 +409,7 @@ if __name__ == '__main__':
 
     print('Seeting up TF environment  ################################################################################')
 
-    samples = np.load(datafile)
+    samples, sample_probs = np.load(datafile)
     print('datafile:', datafile, 'samples.shape:', samples.shape, '\n')
 
     k = 10  # -> N = 2 + 2**k # only works with these N values
@@ -414,13 +428,15 @@ if __name__ == '__main__':
     print('Initial value for M  ######################################################################################')
     np.random.seed(102)
     if 1:
+        M_target_file = 'M_tensor'
         A0 = np.random.randn(2, chi, chi)  # 2 => up, down
     elif 0:
         A0 = [np.ones([chi, chi]), np.ones([chi, chi])]  # gets stuck immediately in a local minimum
-    elif 0:
-        M_target_file = 'M_tensor_seed104'  # 'M_tensor_eps01'
+    elif 1:
+        M_target_file = 'M_tensor'  # 'M_tensor_eps01' 'M_tensor_seed104'
         npzfile = np.load(M_target_file + '.npz')
-        A0 = npzfile['M'] + 1. * np.random.randn(2, chi, chi)
+        A0 = npzfile['M'] + 0.0 * np.random.randn(2, chi, chi) #should be good??
+        print('A0', A0)
     else:
         M_target_file = 'MPS_calibrator_M_currentbest'  # 'M_tensor_eps01'
         npzfile = np.load(M_target_file + '.npz')
