@@ -1,25 +1,28 @@
 # Sampling from M tensor
 # Calibrating M from empirical time series
 
-#import tensorflow as tf
-#from tensorflow.python.keras import Model
-#from tensorflow.python.keras.callbacks import EarlyStopping
 import numpy as np
 import matplotlib.pyplot as plt
-#from mpl_toolkits.axes_grid1 import make_axes_locatable
-#import datetime
 from scipy.linalg import eig
 from scipy.stats import norm
-#import tensorflow_probability as tfp
-#import pandas as pd
+
 
 
 
 class MPS_Sampler():
 
     #-------------------------------------------------------------------------------------------------------------------
-    def __init__(self, M_tensor):
-        self.M = M_tensor
+    def __init__(self, input_params):
+
+        np.set_printoptions(nanstr='')
+
+        self.N_spins = input_params['N_spins']
+        self.K_paths = input_params['K_paths']
+        self.M = input_params['M_tensor']
+        self.transient_multiplier = input_params['transient_multiplier']
+        self.visualization_noise = input_params['visualization_noise']
+        self.max_markov_length = input_params['max_markov_length']
+
         self.Au = self.M[0]
         self.Ad = self.M[1]
         self.chi = self.Au.shape[0]
@@ -29,9 +32,6 @@ class MPS_Sampler():
         self.E = self.AuAu + self.AdAd
 
         w, vl, vr = eig(self.E, left=True, right=True)
-        #w_abs = np.flip(np.sort(np.abs(w)))
-        #xi = 1 / np.log(w_abs[0]/w_abs[1])
-        #print('w:\n', w, w_abs, xi)
 
         indices = np.argsort(np.abs(w))
         ind = indices[-1]
@@ -46,91 +46,162 @@ class MPS_Sampler():
         self.LR = np.dot(self.L, self.R)
         self.xi = 1/np.log(np.abs(w[indices[-1]] / w[indices[-2]]))
 
-        self.loglikelihood = 0
+        self.transient_size = round(self.transient_multiplier * self.xi)
 
-        #print('self.LR', self.LR)
-        #print('leading eig:\n', self.lam, self.L, self.R)
-        #print('correlation length: ', self.xi)
+        self.loglikelihood_tot = 0
+
+        # to record node probailities in decision tree:
+        if self.N_spins <= 20:
+            self.decision_prob_theoretical = np.empty([self.N_spins, 2**(self.N_spins-1), 2]) # site, node, spin
+            self.decision_prob_theoretical.fill(np.nan)
+
+            self.decision_count = np.zeros([self.N_spins, 2 ** (self.N_spins - 1), 2])  # site, node, spin
+
+            self.decision_prob_empirical = np.empty([self.N_spins, 2**(self.N_spins-1), 2]) # site, node, spin
+            self.decision_prob_empirical.fill(np.nan)
+        else:
+            exit('N_spins > 20, stopping to avoid creating a large matrix')
+
+
         print('Eigs:', w)
         print('Lam1:', self.lam, 'xi:', self.xi)
         print('')
 
 
     #-------------------------------------------------------------------------------------------------------------------
-    def __call__(self, N_spins, K_paths, visualization_noise):
+    def __call__(self):
 
         # print('Running sampling')
-        samples = -np.ones((K_paths, N_spins))
-        sample_probs = -np.ones((K_paths, N_spins))
-        rands = np.random.rand(K_paths, N_spins)
+        samples = -np.ones((self.K_paths, self.N_spins))
+        sample_probs = -np.ones((self.K_paths, self.N_spins))
+        rands = np.random.rand(self.K_paths, self.N_spins)
         AuAuR = np.matmul(self.AuAu, self.R) / self.LR
         AdAdR = np.matmul(self.AdAd, self.R) / self.LR
 
-        pus = -np.ones(N_spins)
-        b_len = 3
-        b_pu = -np.ones([N_spins, 2])
-        loglikelihood = 0
+        self.loglikelihood = np.zeros(self.K_paths)
         naive_model_loglikelihood = 0  # naive_model: all probs are 1/2
 
-        for k in range(K_paths):
-            if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 200 == 0):
+        for k in range(self.K_paths):
+            if (k < 1000 and k % 1000 == 0) or (k >= 1000 and k % 2000 == 0):
                 print('Path:', k)
             String = self.L
 
-            for n in range(N_spins):
+
+            current_int_config = 0
+
+            for n in range(self.N_spins):
                 String_AuAuR = np.matmul(String, AuAuR)
                 String_AdAdR = np.matmul(String, AdAdR)  # decreasing exponentially!
                 pu =  String_AuAuR / (String_AuAuR + String_AdAdR)
                 sample_probs[k, n] = pu
+                self.decision_prob_theoretical[n, current_int_config, 1] = pu # [site, node, decision] -> prob
+                self.decision_prob_theoretical[n, current_int_config, 0] = 1 - pu  # [site, node, decision] -> prob
                 #print('hah:', k, 'n:', n, String_AuAuR, String_AdAdR, 'pu:', pu)
-
-                # Check empirically if series is Markov:
-                if k==0:
-                    pus[n] = pu
-                    print('n:', n, 'formers:', samples[k, n-3:n], 'pu:', pu)
-
-                    if n >= b_len:
-                        b = samples[k, n - b_len : n]
-                        b_int = b.dot(2 ** np.arange(b.size)[::-1]) + visualization_noise * 2**b_len * np.random.randn()
-                        b_pu[n] = [b_int, pu + visualization_noise * np.random.randn()]
-
 
                 if rands[k, n] < pu:  # spin-up sampled
                     samples[k, n] = 1
+                    self.decision_count[n, current_int_config, 1] += 1
+                    current_int_config = 2 * current_int_config +1
                     String = np.matmul(String, self.AuAu)
-                    loglikelihood += np.log(pu)
+                    self.loglikelihood[k] += np.log(pu)
                     naive_model_loglikelihood += np.log(0.5)
                 else:  # spin-down sampled
                     samples[k, n] = 0
+                    self.decision_count[n, current_int_config, 0] += 1
+                    current_int_config = 2 * current_int_config
                     String = np.matmul(String, self.AdAd)
-                    loglikelihood += np.log(1 - pu)
+                    self.loglikelihood[k] += np.log(1 - pu)
                     naive_model_loglikelihood += np.log(0.5)
                 if n % 10 == 0:
                     String = String / np.linalg.norm(String)  # safe and enough to renormalize here
 
-            if k==0:
-                fig, (ax1, ax2) = plt.subplots(2, 1, num=101, figsize=(4, 8))
-                ax1.hist(pus, bins=100, density=False)
-                ax1.set_title('Distribution of pu probabilities in 1st path')
-                ax1.set_xlabel('p_u')
-                ax1.set_ylabel('Density')
+        self.loglikelihood_tot = np.sum(self.loglikelihood) / (self.K_paths * self.N_spins)
+        self.naive_model_loglikelihood = naive_model_loglikelihood / (self.K_paths * self.N_spins)
 
-                b_pu = b_pu[b_len:]
-                unique, counts = np.unique(np.round(b_pu[:, 1], 10), return_counts=True)
-                with np.printoptions(precision=6, suppress=True, threshold=np.inf):
-                    print('b_pu: uniques | counts:')
-                    print(np.asarray((unique, counts)).T)
-
-
-                ax2.plot(b_pu[:,0], b_pu[:,1], 'b.')
-                ax2.set_title('Markov property check for 1st path')
-                plt.pause(0.1)
-
-
-        self.loglikelihood = loglikelihood / (K_paths * N_spins)
-        self.naive_model_loglikelihood = naive_model_loglikelihood / (K_paths * N_spins)
+        self.decision_prob_empirical = self.decision_count[:, :, 1] / (np.sum(self.decision_count, axis=2))
 
         return samples, sample_probs
+
+    # Transform bit configuration array into integer
+    def bits2int(self, bits):
+        return bits.dot(2 ** np.arange(len(bits))[::-1])
+
+    def markov_check(self, samples, sample_probs):
+        # Check empirically if series is Markov:
+
+        precursor_length = min(self.max_markov_length, self.N_spins -1)
+        print('precursor_length', precursor_length)
+
+        precursor = -np.ones([self.K_paths, self.N_spins]) # m-length historical precursor in integer form
+
+        # calculate:
+        for k in range(self.K_paths):
+            for n in range(self.N_spins):
+
+                if n >= precursor_length:
+                    bits = samples[k, n - precursor_length: n]
+                    #bits2int = bits.dot(2 ** np.arange(precursor_length)[::-1])
+                    precursor[k, n] = self.bits2int(bits)
+
+        # filter out transient:
+        precursor = precursor[:, precursor_length:]
+        sample_probs = sample_probs[:, precursor_length:]
+
+        # visualize:
+        unique, counts = np.unique(np.round(sample_probs.flatten(), 10), return_counts=True)
+        with np.printoptions(precision=6, suppress=True, threshold=np.inf):
+            print('\nUp_probs used when generating samples (sample_probs):')
+            print('    unique | counts:')
+            print(np.asarray((unique, counts)).T)
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, num=101, figsize=(4, 8))
+        fig.subplots_adjust(left=0.18, bottom=None, right=None, top=None, wspace=None, hspace=0.3)
+
+        ax1.hist(sample_probs.flatten(), bins=100, density=True)
+        ax1.set_title('Histogram of pu probabilities in samples', fontsize=11)
+        ax1.set_xlabel('pu probability')
+        ax1.set_ylabel('Density')
+
+        ax2.plot(precursor.flatten(), sample_probs.flatten(), 'b.')
+        ax2.set_title('Markov property check', fontsize=11)
+        ax2.set_xlabel('int rep of precursor string of length '+ str(precursor_length))
+        ax2.set_ylabel('pu probability')
+        plt.pause(0.1)
+
+
+    def all_configs_stats(self, samples):
+        # Compare empirical config probs with theoretical probs:
+
+        # decision tree probs:
+        print('Theoretical decision tree up_probs dictated by the M tensor:')
+        print(self.decision_prob_theoretical[:,:,1].T)
+
+        # decision tree probs:
+        print('Empirical decision tree up_probs dictated by the realized sample:')
+        print(self.decision_prob_empirical[:,:].T)
+
+
+
+        # configurations statistics:
+        bits_int = np.zeros(self.K_paths)
+        p_theor = np.zeros(self.K_paths)
+        for k in range(self.K_paths):
+            bits = samples[k, :]
+            bits_int[k] = self.bits2int(bits) # bits.dot(2 ** np.arange(self.N_spins)[::-1])
+            p_theor[k] = np.exp(self.loglikelihood[k])
+
+
+        unique, counts = np.unique(bits_int, return_counts=True)
+
+        plt.figure(num=301)
+        plt.plot(bits_int, p_theor, 'rx')
+        plt.plot(unique, counts/self.K_paths, 'b.')
+        plt.xlabel('configuration (integer rep)')
+        plt.ylabel('frequency')
+        plt.title('Occurrence frequency in sample' + ' K=' + str(self.K_paths) + ' N=' + str(self.N_spins))
+        plt.legend(['theoretical', 'empirical'])
+
+
 
     def corr_by_time_avr(self, samples):
         print('Running corr_by_time_avr')
@@ -159,24 +230,8 @@ class MPS_Sampler():
 
     def magnetization_by_time_avr(self, samples):
 
-        bs = -np.ones(samples.shape[0])
-        for k in range(samples.shape[0]):
-            b = samples[k, :]
-            b_int = b.dot(2 ** np.arange(b.size)[::-1])
-            bs[k] = b_int
 
-        unique, counts = np.unique(bs, return_counts=True)
-        desc = ['{0:b}'.format(n) for n in unique.astype(int)] # ['{0:b}'.format(n) for n in range(samples.shape[1])]
-        print(unique.astype(int), desc, counts)
-        print('bs:\n', np.asarray((unique.astype(int), desc, counts)).T) #['00', '01', '10', '11']
 
-        print('pu=', (counts[2]+counts[3])/(np.sum(counts)), 'puu=', counts[3]/(counts[2]+counts[3]),
-              'pdu=', counts[1]/(counts[0]+counts[1]))
-        #
-        # print('00', np.array([0, 0]).dot(2 ** np.arange(2)[::-1]))
-        # print('01', np.array([0, 1]).dot(2 ** np.arange(2)[::-1]))
-        # print('10', np.array([1, 0]).dot(2 ** np.arange(2)[::-1]))
-        # print('11', np.array([1, 1]).dot(2 ** np.arange(2)[::-1]))
 
         tot_magn = samples.mean(axis=1)
 
@@ -190,7 +245,7 @@ class MPS_Sampler():
 
         M_mean = np.mean(tot_magn)
         M_std = np.std(tot_magn)
-        xx = np.linspace(0,1,1000)
+        xx = np.linspace(0, 1, 1000)
         yy = norm.pdf(xx, M_mean, M_std)
 
         #data = np.random.normal(M_mean, M_std, 1000)
@@ -234,11 +289,15 @@ if __name__ == '__main__':
 
     print('\nInputs:  ################################################################################################')
 
-    N_spins = 5
-    K_paths = 1000
-    transient_multiplier = 0  # transient_size = transient_multiplier * sampler.xi
-    samples_file = 'samples.npy'
+    N_spins_ = 5
+    K_paths_ = 2000
+
+    samples_file = 'samples.npz'
     M_tensor_file = 'M_tensor'
+    transient_multiplier = 0.0  # transient_size = transient_multiplier * sampler.xi
+    visualization_noise = 0.0
+    max_markov_length = 5 # max lengths of history when doing the markovity check.
+                          # Effective value: min(N_spins-1, max_markov_length), i.e., last generation step
 
     # Define MPS tensor to sample from:
     np.random.seed(104) #104: xi=5.27
@@ -268,17 +327,29 @@ if __name__ == '__main__':
         M_tensor = np.array([Au, Ad])
         dumpM_file = 'M_tensor_33'
     else:
+        np.random.seed(104)  # 104: xi=5.27
         Au = np.random.randn(2,2)
         Ad = np.random.randn(2,2)
-        print('M:', Au, Ad)
+        print('M:', Au, '\n', Ad)
         M_tensor = np.array([Au, Ad])
         dumpM_file = 'M_tensor_seed104'
+
+
+    print('\nInitialization: #########################################################################################')
 
     # Dump M_tensor used for sampling:
     np.savez(dumpM_file, M=M_tensor)     # specific file, always the same, and has specific name
     np.savez(M_tensor_file, M=M_tensor)  # general file, always different
 
-    print('N_spins', N_spins, 'K_paths', K_paths, 'transient_multiplier:', transient_multiplier)
+    input_params = {'N_spins': N_spins_,
+                    'K_paths': K_paths_,
+                    'M_tensor': M_tensor,
+                    'transient_multiplier': transient_multiplier,
+                    'visualization_noise': visualization_noise,
+                    'max_markov_length': max_markov_length}
+
+    print('N_spins', input_params['N_spins'], 'K_paths', input_params['K_paths'],
+          'transient_multiplier:', input_params['transient_multiplier'])
     print('M_tensor.shape:', M_tensor.shape)
     print('M_tensor was dumped in:', dumpM_file)
 
@@ -286,26 +357,30 @@ if __name__ == '__main__':
     print('\nSampling: ###############################################################################################')
 
     # sampling:
-    sampler = MPS_Sampler(M_tensor)
-    transient_size = transient_multiplier * round(5 * sampler.xi)
-    samples, sample_probs = sampler(transient_size + N_spins, K_paths, visualization_noise=0.0)
-    samples = samples[:, transient_size:]  # remove transient
-    print('After removing', transient_multiplier,'*xi transients remaining samples.shape:', samples.shape)
-    if 1:
+    sampler = MPS_Sampler(input_params)
+    samples, sample_probs = sampler()
+    samples = samples[:, sampler.transient_size:]  # remove transient
+    print('After removing', sampler.transient_multiplier,'*xi transients remaining samples.shape:', samples.shape)
+    if 0:
         print('Samples:\n', samples)
 
-    print('\nAverage sampled loglikelihood:', sampler.loglikelihood)
+    print('\nAverage sampled loglikelihood:', sampler.loglikelihood_tot)
     print('Naive p=0.5 model loglikelihood:', sampler.naive_model_loglikelihood)
 
     # saving to disk:
-    np.save(samples_file, [samples, sample_probs])
+    np.savez(samples_file, samples=samples, sample_probs=sample_probs)
     print('\nSamples dumped in to', samples_file)
 
 
     print('\nAnalysis:  ##############################################################################################')
 
+    # Config occurrence in sample, theoretical vs empirical
+    sampler.all_configs_stats(samples)
 
+    # Check if model is Markov:
+    sampler.markov_check(samples, sample_probs)
 
+    # Magnetization distribution:
     sampler.magnetization_by_time_avr(samples)
     if 0:
         plt.show()
@@ -326,24 +401,19 @@ if __name__ == '__main__':
 
         exit()
 
+
+
+
+
+
     sample_corr = sampler.correlations(samples)
     print('sample_corr:', sample_corr)
 
-    #samples2 = sampler(N_spins, K_paths)
-    #sample_corr2 = sampler.correlations(samples2)
-
-    #samples3 = sampler(N_spins, K_paths)
-    #sample_corr3 = sampler.correlations(samples3)
-
-    plt.figure(2)
     if 1:
+        plt.figure(2)
         plt.semilogy(np.abs(sample_corr), '-k.')
-        #plt.semilogy(np.abs(sample_corr2), 'b.')
-        #plt.semilogy(np.abs(sample_corr3), 'r.')
     else:
         plt.loglog(np.abs(sample_corr), '-k.')
-        #plt.loglog(np.abs(sample_corr2), 'b.')
-        #plt.loglog(np.abs(sample_corr3), 'r.')
 
 print('--- The End ---')
 plt.show()

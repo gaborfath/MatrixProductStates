@@ -9,7 +9,10 @@ from scipy.stats import norm
 class MPS_comparator():
 
     #-------------------------------------------------------------------------------------------------------------------
-    def __init__(self, M_tensor1, M_tensor2):
+    def __init__(self, M_tensor1, M_tensor2, samples):
+
+        self.K_paths, self.N_spins = samples.shape
+        self.samples = samples
 
         # Setting M1:
         self.M1 = M_tensor1
@@ -61,68 +64,96 @@ class MPS_comparator():
         self.LR2 = np.dot(self.L2, self.R2)
         self.xi2 = 1 / np.log(np.abs(w2[indices2[-1]] / w2[indices2[-2]]))
 
-        # Printing:
+        # to record node probabilities in decision tree:
+        if self.N_spins <= 20:
+            self.decision_prob_theoretical_1 = np.empty([self.N_spins, 2 ** (self.N_spins - 1), 2])  # site, node, spin
+            self.decision_prob_theoretical_1.fill(np.nan)
+            self.decision_prob_theoretical_2 = np.empty([self.N_spins, 2 ** (self.N_spins - 1), 2])  # site, node, spin
+            self.decision_prob_theoretical_2.fill(np.nan)
 
-        print('Eigs_1:', w1)
-        print('Lam1:', self.lam1, 'xi1:', self.xi1)
-        print('Eigs_2:', w2)
-        print('Lam2:', self.lam2, 'xi2:', self.xi2)
-        print('')
+            self.decision_count = np.zeros([self.N_spins, 2 ** (self.N_spins - 1), 2])  # site, node, spin
+
+            self.decision_prob_empirical = np.empty([self.N_spins, 2 ** (self.N_spins - 1), 2])  # site, node, spin
+            self.decision_prob_empirical.fill(np.nan)
+        else:
+            exit('N_spins > 20, stopping to avoid creating a large matrix')
+
+        # Printing:
+        if 0:
+            print('Eigs_1:', w1)
+            print('Lam1:', self.lam1, 'xi1:', self.xi1)
+            print('Eigs_2:', w2)
+            print('Lam2:', self.lam2, 'xi2:', self.xi2)
+            print('')
 
         return
 
     #-------------------------------------------------------------------------------------------------------------------
-    def compare(self, samples):
+    def compare(self):
 
         AuAuR_1 = np.matmul(self.A1uA1u, self.R1) / self.LR1
         AdAdR_1 = np.matmul(self.A1dA1d, self.R1) / self.LR1
         AuAuR_2 = np.matmul(self.A2uA2u, self.R2) / self.LR2
         AdAdR_2 = np.matmul(self.A2dA2d, self.R2) / self.LR2
 
-        K_paths, N_spins = samples.shape
-        pus_1 = -np.ones([K_paths, N_spins])
-        pus_2 = -np.ones([K_paths, N_spins])
+        pus_1 = -np.ones([self.K_paths, self.N_spins])
+        pus_2 = -np.ones([self.K_paths, self.N_spins])
 
-        for k in range(K_paths):
-            if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 300 == 0):
-                print('Processing path:', k)
+        for k in range(self.K_paths):
+            #if (k < 1000 and k % 100 == 0) or (k >= 1000 and k % 300 == 0):
+            #    print('Processing path:', k)
             String_1 = self.L1
             String_2 = self.L2
 
-            for n in range(N_spins):
+            current_int_config = 0
+
+            for n in range(self.N_spins):
                 String_AuAuR_1 = np.matmul(String_1, AuAuR_1)
                 String_AdAdR_1 = np.matmul(String_1, AdAdR_1)  # decreasing exponentially!? -> normalize
                 #print('hah0:', k, 'n:', n, String_AuAuR_1, String_AdAdR_1, String_1)
                 #print('hah1:', k, 'n:', n, String_AuAuR_1, String_AdAdR_1)
                 #
                 pu_1 = String_AuAuR_1 / (String_AuAuR_1 + String_AdAdR_1)
+                self.decision_prob_theoretical_1[n, current_int_config, 1] = pu_1  # [site, node, decision] -> prob
+                self.decision_prob_theoretical_1[n, current_int_config, 0] = 1 - pu_1  # [site, node, decision] -> prob
 
                 String_AuAuR_2 = np.matmul(String_2, AuAuR_2)
                 String_AdAdR_2 = np.matmul(String_2, AdAdR_2)  # decreasing exponentially!?
                 #print('hah2:', k, 'n:', n, String_AuAuR_2, String_AdAdR_2)
                 #
                 pu_2 = String_AuAuR_2 / (String_AuAuR_2 + String_AdAdR_2)
+                self.decision_prob_theoretical_2[n, current_int_config, 1] = pu_2  # [site, node, decision] -> prob
+                self.decision_prob_theoretical_2[n, current_int_config, 0] = 1 - pu_2  # [site, node, decision] -> prob
 
                 pus_1[k,n] = pu_1
                 pus_2[k, n] = pu_2
 
-                if samples[k, n] == 1:  # spin-up sampled
+                if self.samples[k, n] == 1:  # spin-up sampled
+                    current_int_config = 2 * current_int_config + 1
                     String_1 = np.matmul(String_1, self.A1uA1u)
                     String_2 = np.matmul(String_2, self.A2uA2u)
                 else:  # spin-down sampled
+                    current_int_config = 2 * current_int_config
                     String_1 = np.matmul(String_1, self.A1dA1d)
                     String_2 = np.matmul(String_2, self.A2dA2d)
                 if n % 10 == 0:
                     String_1 = String_1 / np.linalg.norm(String_1)  # safe and enough to renormalize here
                     String_2 = String_2 / np.linalg.norm(String_2)  # safe and enough to renormalize here
 
-        print('MPS_comparator:compare finished.')
+        #print('comparator: pus_1', pus_1)
+        #print('comparator: pus_2', pus_2)
 
         return pus_1, pus_2
 
     #-------------------------------------------------------------------------------------------------------------------
     def visualize(self, pus_1, pus_2, noise):
-        #print('\nPlotting...')
+
+        # decision tree probs:
+        print('Comparator: Theoretical decision tree up_probs dictated by the M1 (target) tensor:')
+        print(self.decision_prob_theoretical_1[:, :, 1].T)
+        print('Comparator: Theoretical decision tree up_probs dictated by the M2 (model) tensor:')
+        print(self.decision_prob_theoretical_2[:, :, 1].T)
+        print('')
 
         # adding noise for visualization
         pus_1 = pus_1 + noise * np.random.randn(*pus_1.shape)
@@ -131,9 +162,9 @@ class MPS_comparator():
         plt.figure(201, figsize=(4,4))
         plt.clf()
         colors = ['b', 'r', 'g', 'm']
-        num_sample_to_visualize = 4
+        num_sample_to_visualize = 100
         for i in range(min(num_sample_to_visualize, pus_1.shape[0])):
-            plt.plot(pus_1[i, :], pus_2[i, :], marker='.', linestyle='', color=colors[i])
+            plt.plot(pus_1[i, :], pus_2[i, :], marker='.', linestyle='', color=colors[i % len(colors)])
 
         plt.plot([0,1], [0,1], 'r--')
 
@@ -196,9 +227,10 @@ if __name__ == '__main__':
     print('\nComparison:  ##############################################################################################')
     # Comparing two MPSs on the same sample to see how close they are in sampling probabilities
 
-    comparator = MPS_comparator(M_tensor1, M_tensor2)
-    pus_1, pus_2 = comparator.compare(samples)
-    comparator.visualize(pus_1, pus_2, noise=0.0)
+    comparator = MPS_comparator(M_tensor1, M_tensor2, samples)
+    pus_1, pus_2 = comparator.compare()
+
+    comparator.visualize(pus_1, pus_2, noise=0.05)
 
     plt.show()
     exit()
