@@ -146,7 +146,7 @@ class MPS_comparator():
         return pus_1, pus_2
 
     #-------------------------------------------------------------------------------------------------------------------
-    def visualize(self, pus_1, pus_2, noise):
+    def visualize(self, ax, pus_1, pus_2, noise):
 
         # decision tree probs:
         print('Comparator: Theoretical decision tree up_probs dictated by the M1 (target) tensor:')
@@ -159,18 +159,28 @@ class MPS_comparator():
         pus_1 = pus_1 + noise * np.random.randn(*pus_1.shape)
         pus_2 = pus_2 + noise * np.random.randn(*pus_2.shape)
 
-        plt.figure(201, figsize=(4,4))
-        plt.clf()
+        ax.clear()
         colors = ['b', 'r', 'g', 'm']
         num_sample_to_visualize = 100
         for i in range(min(num_sample_to_visualize, pus_1.shape[0])):
-            plt.plot(pus_1[i, :], pus_2[i, :], marker='.', linestyle='', color=colors[i % len(colors)])
+            ax.plot(pus_1[i, :], pus_2[i, :], marker='.', linestyle='', color=colors[i % len(colors)])
 
-        plt.plot([0,1], [0,1], 'r--')
+        ax.plot([0,1], [0,1], 'r--')
 
-        plt.xlabel('$p_{up}^{Target}$')
-        plt.ylabel('$p_{up}^{Model}$')
-        #plt.pause(0.1)
+        ax.set_xlabel('$p_{up}(Target)$')
+        ax.set_ylabel('$p_{up}(Model)$')
+
+        # plt.figure(201, figsize=(4, 4))
+        # plt.clf()
+        # colors = ['b', 'r', 'g', 'm']
+        # num_sample_to_visualize = 100
+        # for i in range(min(num_sample_to_visualize, pus_1.shape[0])):
+        #     plt.plot(pus_1[i, :], pus_2[i, :], marker='.', linestyle='', color=colors[i % len(colors)])
+        #
+        # plt.plot([0, 1], [0, 1], 'r--')
+        #
+        # plt.xlabel('$p_{up}^{Target}$')
+        # plt.ylabel('$p_{up}^{Model}$')
 
         return
 

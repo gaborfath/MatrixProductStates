@@ -126,6 +126,11 @@ class MPS_Sampler():
     def bits2int(self, bits):
         return bits.dot(2 ** np.arange(len(bits))[::-1])
 
+    def int2bits(self, n, num_bits):
+        # n: integer to convert to binary array
+        # num_bits: min length of the resulting numpy array
+        return np.array([int(i) for i in bin(n)[2:].zfill(num_bits)])
+
     def markov_check(self, samples, sample_probs):
         # Check empirically if series is Markov:
 
@@ -368,7 +373,8 @@ if __name__ == '__main__':
     print('Naive p=0.5 model loglikelihood:', sampler.naive_model_loglikelihood)
 
     # saving to disk:
-    np.savez(samples_file, samples=samples, sample_probs=sample_probs)
+    np.savez(samples_file, samples=samples, sample_probs=sample_probs,
+             decision_prob_matrix=sampler.decision_prob_theoretical)
     print('\nSamples dumped in to', samples_file)
 
 

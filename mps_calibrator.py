@@ -16,6 +16,8 @@ from scipy.sparse.linalg import eigs
 import mps_comparator
 
 
+
+
 def augment_combine(A, B, small):
     num_states = len(A)
     nA, mA = A[0].shape
@@ -35,7 +37,7 @@ def analyze_MPS(A, axs, color):
     eval_absmax = np.max(np.abs(evals))
 
     evals = evals/eval_absmax
-    print('eval_absmax:', eval_absmax)
+    #print('eval_absmax:', eval_absmax)
     r = 1 / np.sqrt(eval_absmax)
     Au, Ad = r * A
 
@@ -87,8 +89,8 @@ def analyze_MPS(A, axs, color):
     #ind = np.argmax(np.abs(evals_k))
     indices = np.argsort(np.abs(evals_k))
     ind = indices[-1]
-    print('---Right:\nevals_k:', evals_k, np.abs(evals_k))
-    print('ind:', ind, 'evals_k[ind]:', evals_k[ind])
+    #print('---Right:\nevals_k:', evals_k, np.abs(evals_k))
+    #print('ind:', ind, 'evals_k[ind]:', evals_k[ind])
 
     v_right = evecs_k[:,ind] # real
     #print('v_right', v_right)
@@ -98,8 +100,8 @@ def analyze_MPS(A, axs, color):
     #ind = np.argmax(np.abs(evals_k))
     indices = np.argsort(np.abs(evals_k))
     ind = indices[-1]
-    print('---Left:\nevals_k:', evals_k, np.abs(evals_k))
-    print('ind:', ind, 'evals_k[ind]:', evals_k[ind])
+    #print('---Left:\nevals_k:', evals_k, np.abs(evals_k))
+    #print('ind:', ind, 'evals_k[ind]:', evals_k[ind])
     v_left = np.conjugate(evecs_k[:,ind]) # real but different
     #print('v_left', v_left)
     #print(np.dot(v_left, v_right))
@@ -130,12 +132,12 @@ def analyze_MPS(A, axs, color):
     #print('corr:', corr)
     #eigenvalue method with L and R doesnt seem to work, maybe due to gapless spectrum and E spectral singularity
 
-    # Lukyanov-Terras:
-    corrzz_exact = np.zeros(r_max)
-    slope_0p5 = np.zeros(r_max)
-    for l in range(1, r_max):
-        corrzz_exact[l] = - 1/(2*np.pi**2 * l**2) + (-1)**l * 1/(2*np.pi**2 * l**2)
-        slope_0p5[l] = 0.4 / l**0.5
+    # # Lukyanov-Terras:
+    # corrzz_exact = np.zeros(r_max)
+    # slope_0p5 = np.zeros(r_max)
+    # for l in range(1, r_max):
+    #     corrzz_exact[l] = - 1/(2*np.pi**2 * l**2) + (-1)**l * 1/(2*np.pi**2 * l**2)
+    #     slope_0p5[l] = 0.4 / l**0.5
 
 
 
@@ -152,18 +154,17 @@ def analyze_MPS(A, axs, color):
     axs[5].set_xscale('log')
     axs[5].set_yscale('log')
     axs[5].plot(np.abs(corr[:, 0]), 'r.-', label='$<S^z_0S^z_r>$')
-    axs[5].plot(np.abs(corrzz_exact), 'ko', label='$<S^z_0S^z_r>_{exact}$')
+    #axs[5].plot(np.abs(corrzz_exact), 'ko', label='$<S^z_0S^z_r>_{exact}$')
     axs[5].plot(np.abs(corr[:, 1]), 'b.-', label='$<S^+_0S^-_r>$')
-    axs[5].plot(np.abs(slope_0p5), 'k-', label='0.4* r^{-0.5}')
+    #axs[5].plot(np.abs(slope_0p5), 'k-', label='0.4* r^{-0.5}')
     axs[5].legend(loc="lower left")
     axs[5].set_xlabel('r')
     axs[5].set_ylabel('corr(r)')
 
     # Heatmap of matrix elements
-    axs[6].clear()
-    axs[6].title.set_text('Heat map of Au')
-    im6 = axs[6].imshow(Au, cmap='cividis')
-    #axs[6].colorbar(im6, ax=axs[6])
+    #axs[6].clear()
+    #axs[6].title.set_text('Heat map of Au')
+    #im6 = axs[6].imshow(Au, cmap='cividis')
 
     axs[7].clear()
     axs[7].title.set_text('Heat map of Ad')
@@ -178,6 +179,8 @@ class MPSCalibrator(Model):
 
         self.samples = train_data['samples']
         self.sample_probs = train_data['sample_probs']
+        self.decision_prob_matrix = train_data['decision_prob_matrix']
+
         print('datafile:', datafile,
               'samples.shape:', self.samples.shape, 'sample_probs.shape:', self.sample_probs.shape, '\n')
         self.k = k
@@ -189,7 +192,7 @@ class MPSCalibrator(Model):
         self.counter = 0
         self.max_iter = max_iter
         self.grad_tolerance = grad_tolerance
-        self.result_log = pd.DataFrame(columns=['step', 'runtime', 'chi', 'loss', 'min_loss', 'grad norm', 'tolerance'])
+        self.result_log = pd.DataFrame(columns=['step', 'runtime', 'chi', 'loss', 'min_loss', 'grad_norm', 'tolerance'])
 
         self.log2N = int(np.log2(self.N-2)) # fastest for N = 2^k +2 = 4, 6, 10, 18, ...
         print('Working with N=', 2**self.log2N+2, ' chi=', self.chi)
@@ -201,6 +204,7 @@ class MPSCalibrator(Model):
 
         self.min_loss = float('inf')
 
+        self.axs = axs
         self.ax1 = axs[0]
         self.ax1.set_xlabel('runtime (sec)')
         self.ax1.set_ylabel('loss')
@@ -236,6 +240,11 @@ class MPSCalibrator(Model):
 
         return A_normalized
 
+    def int2bits(self, n, num_bits):
+        # n: integer to convert to binary array
+        # num_bits: min length of the resulting numpy array
+        return np.array([int(i) for i in bin(n)[2:].zfill(num_bits)])
+
     def print_result_log(self, value, gradnorm):
         toc = datetime.datetime.now()
 
@@ -247,7 +256,7 @@ class MPSCalibrator(Model):
 
         row = {'step': self.counter, 'runtime': round((toc - tic).total_seconds(), 2),
                'chi': self.chi, 'loss': round(value.numpy(), 8), 'min_loss': round(self.min_loss, 10),
-               'grad norm': round(gradnorm.numpy(), 8), 'tolerance': self.grad_tolerance}
+               'grad_norm': round(gradnorm.numpy(), 8), 'tolerance': self.grad_tolerance}
         print(row)
         new_row = pd.DataFrame([row])
         self.result_log = pd.concat([self.result_log, new_row], axis=0, ignore_index=True)
@@ -255,10 +264,13 @@ class MPSCalibrator(Model):
 
     def lossfunction(self, A):
         if self.loss_version == 'prob_mse':
-            # sample_probs based MSE loss
+            # sample_probs based MSE loss (on MC sample)
             return self.lossfunction_prob_mse(A)
+        elif self.loss_version == 'decision_prob_matrix':
+            # decision_prob_matrix based MSE loss (on theoretical or empirical conditional decision prob matrix)
+            return self.lossfunction_decision_prob_matrix(A)
         elif self.loss_version == 'likelihood':
-            # negative loglikelihood loss
+            # negative loglikelihood loss (on Monte Carlo sample)
             return self.lossfunction_likelihood(A)
 
     def record_currentbest(self, loss, A):
@@ -280,10 +292,84 @@ class MPSCalibrator(Model):
 
             comparator = mps_comparator.MPS_comparator(M_target, M_model, self.samples)
             pus_1, pus_2 = comparator.compare()
-            comparator.visualize(pus_1, pus_2, noise=0.05)
+            comparator.visualize(self.axs[6], pus_1, pus_2, noise=0.005)
 
-            # plt.show()
-            # exit()
+        if 1:
+            analyze_MPS(A.numpy(), self.axs, color='k')
+
+    def lossfunction_decision_prob_matrix(self, A):
+        # Given A, calculate the MSE based on the target and model decision prob matrices
+
+        self.counter += 1
+
+        # Create EN for an almost infinite long chain of unstructured sites: ##########################################
+
+        A = tf.reshape(A, [2, self.chi, self.chi])
+        Au = A[0]
+        Ad = A[1]
+
+        AAu = tf.experimental.numpy.kron(Au, Au)
+        AAd = tf.experimental.numpy.kron(Ad, Ad)
+
+        E = AAu + AAd
+        E2 = tf.matmul(E, E)
+
+        E2k = E2
+        for k in range(self.log2N - 1):
+            E2k = tf.matmul(E2k, E2k)
+            normalizer = 1 / tf.linalg.trace(E2k)
+            E2k = normalizer * E2k  # safe and enough to renormalize here, as normalizer will be canceled by the same factor in the denominator term
+
+        EN = tf.matmul(E2k, E2)  # N = 2^k +2
+
+        # Iterate through all possible configs: ########################################################################
+
+        N_spins = self.samples.shape[1]
+        K_paths = 2 ** N_spins
+
+        config_bits = np.empty([K_paths, N_spins])
+        config_bits.fill(np.nan)
+
+        for k in range(K_paths):
+            config_bits[k, :] = self.int2bits(k, N_spins)
+
+        mse = 0
+
+        for k in range(K_paths):
+
+            String = EN
+
+            current_int_config = 0
+
+            for n in range(N_spins):
+                String_AAu = tf.matmul(String, AAu)
+                String_AAd = tf.matmul(String, AAd)
+                tr_u = tf.linalg.trace(String_AAu)
+                tr_d = tf.linalg.trace(String_AAd)
+                pu =  tr_u / (tr_u + tr_d)
+
+                pu_exact = self.decision_prob_matrix[n, current_int_config, 1]               #self.sample_probs[k, n]
+                mse += tf.square(pu - pu_exact) #* 2**n
+                #print('k, n:', k, n, 'pu:', pu, 'pu_exact:', pu_exact)
+
+                if config_bits[k, n] == 1:  # spin-up sampled
+                    current_int_config = 2 * current_int_config + 1
+                    String = tf.matmul(String, AAu)
+                    norm = tf.linalg.trace(String)
+                    String = String / norm
+                else:  # spin-down sampled
+                    current_int_config = 2 * current_int_config
+                    String = tf.matmul(String, AAd)
+                    norm = tf.linalg.trace(String)
+                    String = String / norm
+
+        mse = mse / (K_paths * N_spins)
+
+        if mse.numpy() < self.min_loss:
+            self.record_currentbest(mse.numpy(), A)
+
+        return mse  # mse to minimize
+
 
     def lossfunction_prob_mse(self, A):
         #print('Running targetfunction', A.shape)
@@ -350,27 +436,7 @@ class MPSCalibrator(Model):
         mse = mse / (K_paths * N_spins)
 
         if mse.numpy() < self.min_loss:
-
             self.record_currentbest(mse.numpy(), A)
-
-            # self.min_loss = mse.numpy()
-            # np.savez(self.outfile_currentbest, M=A)
-            # print('Current best result dumped:', self.outfile_currentbest)
-            #
-            # # To compare with known target M on the fly:
-            # if 1:
-            #     M_target_file = 'M_tensor'  # 'M_tensor_eps01' 'M_tensor_seed104' 'M_tensor'
-            #     npzfile = np.load(M_target_file + '.npz')
-            #     M_target = npzfile['M']
-            #     print('M_target:\n', M_target)
-            #
-            #     npzfile = np.load(self.outfile_currentbest + '.npz')
-            #     M_model = npzfile['M']
-            #     print('M_model:\n', M_model)
-            #
-            #     comparator = mps_comparator.MPS_comparator(M_target, M_model, self.samples)
-            #     pus_1, pus_2 = comparator.compare()
-            #     comparator.visualize(pus_1, pus_2, noise=0.0)
 
         return mse  # mse to minimize
 
@@ -442,32 +508,7 @@ class MPSCalibrator(Model):
         loglikelihood = loglikelihood / (K_paths * N_spins)
 
         if -loglikelihood.numpy() < self.min_loss:
-
             self.record_currentbest(-loglikelihood.numpy(), A)
-
-            # self.min_loss = - loglikelihood.numpy()
-            #
-            # np.savez(self.outfile_currentbest, M=A)
-            # print('Current best result dumped:', self.outfile_currentbest)
-            #
-            # # To compare with known target M_target on the fly:
-            # if 1:
-            #     M_target_file = 'M_tensor'  # 'M_tensor_eps01' 'M_tensor_seed104' 'M_tensor'
-            #     npzfile = np.load(M_target_file + '.npz')
-            #     M_target = npzfile['M']
-            #     print('M_target:\n', M_target)
-            #
-            #     npzfile = np.load(self.outfile_currentbest + '.npz')
-            #     M_model = npzfile['M']
-            #     print('M_model:\n', M_model)
-            #
-            #     comparator = mps_comparator.MPS_comparator(M_target, M_model, self.samples)
-            #     pus_1, pus_2 = comparator.compare()
-            #     comparator.visualize(pus_1, pus_2, noise=0.0)
-            #
-            #     #plt.show()
-            #     #exit()
-
 
         return -loglikelihood  # negative likelihood to minimize = likelihood to maximize
 
@@ -484,6 +525,36 @@ class MPSCalibrator(Model):
             self.print_result_log(value, tf.norm(grad, axis=-1))
 
         return value, grad
+
+
+    def multi_valuator(self, A0_np, A1_np, lambdas):
+        # Calculate the loss along a one-dimensional path interpolating between two M tensors. No calibration.
+
+        sh = np.shape(A0_np)
+        values = np.zeros(len(lambdas))
+        grad_norms = np.zeros(len(lambdas))
+
+        for i, lam in enumerate(lambdas):
+            if i % 100 == 0:
+                print('i', i)
+            A_lam = (1- lam) * A0_np + lam * A1_np
+
+            A = tf.convert_to_tensor(np.reshape(A_lam, sh[0] * sh[1] * sh[2]))
+
+            value, grad = tfp.math.value_and_gradient(self.lossfunction, A)
+            values[i] = value.numpy()
+            grad_norms[i] = tf.norm(grad, axis=-1).numpy()
+            if 1:
+                print('Value:', value.numpy())
+                #print('Gradient:', grad)
+                print('Grad norm:', tf.norm(grad, axis=-1).numpy())
+
+        plt.figure(num=401)
+        plt.plot(lambdas, values, '.')
+        plt.figure(num=402)
+        plt.plot(lambdas, grad_norms, '.')
+
+        return
 
     #@tf.function
     def run_calibrator(self, color, tic):
@@ -518,14 +589,16 @@ if __name__ == '__main__':
     print('Input parameters  #########################################################################################')
 
     # loss function version to use:
-    if 1:
+    if 0:
         loss_version = 'prob_mse'
+    elif 1:
+        loss_version = 'decision_prob_matrix'
     else:
         loss_version = 'likelihood'
 
     # Calibration parameters:
     chi = 2  # starting value 4
-    grad_tolerance = 1.e-6
+    grad_tolerance = 1.e-9 #-6
     learning_rate = 0.01  # 0.001 default - no impact for BFGS
 
     # Samples to calibrate to:
@@ -557,20 +630,33 @@ if __name__ == '__main__':
     print('Initial value for M  ######################################################################################')
     np.random.seed(102)
     if 1:
+        np.random.seed(113)
         M_target_file = 'M_tensor'
         A0 = np.random.randn(2, chi, chi)  # 2 => up, down
     elif 0:
         A0 = [np.ones([chi, chi]), np.ones([chi, chi])]  # gets stuck immediately in a local minimum
     elif 1:
-        M_target_file = 'M_tensor'  # 'M_tensor_eps01' 'M_tensor_seed104'
+        M_target_file = 'M_tensor_seed104'  # 'M_tensor_eps01' 'M_tensor_seed104' 'M_tensor'
         npzfile = np.load(M_target_file + '.npz')
-        A0 = npzfile['M'] + 0.0 * np.random.randn(2, chi, chi) #should be good??
+        A0 = npzfile['M'] + 1.2 * np.random.randn(2, chi, chi) #should be good??
         print('A0', A0)
     else:
         M_target_file = 'MPS_calibrator_M_currentbest'  # 'M_tensor_eps01'
         npzfile = np.load(M_target_file + '.npz')
         A0 = npzfile['M'] + 0.0 * np.random.randn(2, chi, chi)
 
+    if 1:
+        calibrator = MPSCalibrator(train_data, k, None, loss_version, A0, learning_rate, axs, None,
+                                   grad_tolerance)
+        lambdas = np.linspace(0,1,1000)
+
+        M_target_file = 'M_tensor_seed104'  # 'M_tensor_eps01' 'M_tensor_seed104' 'M_tensor'
+        npzfile = np.load(M_target_file + '.npz')
+        A1 = npzfile['M']
+
+        calibrator.multi_valuator(A0, A1, lambdas)
+        plt.show()
+        exit()
 
     epochs_list = 8 * [300]  # [2000, 1500, 1000, 800, 600, 400, 400, 400]
     for i_chi in range(1):
