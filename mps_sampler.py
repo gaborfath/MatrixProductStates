@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 from scipy.linalg import eig
 from scipy.stats import norm
 
-
+from mps_comparator import *
+from mps_comparator import MPS_comparator
 
 
 class MPS_Sampler():
@@ -120,7 +121,46 @@ class MPS_Sampler():
 
         self.decision_prob_empirical = self.decision_count[:, :, 1] / (np.sum(self.decision_count, axis=2))
 
+        print('self.decision_prob_theoretical[7, :, 1]', self.decision_prob_theoretical[7, :, 1])
         return samples, sample_probs
+
+    # Create every possible configuration and calculate decition_prob_theoretical
+    def populate_decision_prob_theoretical(self):
+        print('Not good yet at all!')
+        exit()
+
+        AuAuR = np.matmul(self.AuAu, self.R) / self.LR
+        AdAdR = np.matmul(self.AdAd, self.R) / self.LR
+
+        for k in range(2**(self.N_spins - 1)):
+            print('k:', k)
+
+            String = self.L
+
+            bit_list = self.int2bits(k, N_spins-1)
+            print('bit_list', bit_list)
+
+            for n in bit_list:
+                String_AuAuR = np.matmul(String, AuAuR)
+                String_AdAdR = np.matmul(String, AdAdR)  # decreasing exponentially!
+                pu = String_AuAuR / (String_AuAuR + String_AdAdR)
+                self.decision_prob_theoretical[n, k, 1] = pu  # [site, node, decision] -> prob
+                self.decision_prob_theoretical[n, k, 0] = 1 - pu  # [site, node, decision] -> prob
+                # print('hah:', k, 'n:', n, String_AuAuR, String_AdAdR, 'pu:', pu)
+
+                if n==1:  # spin-up sampled
+                    String = np.matmul(String, self.AuAu)
+                else:  # spin-down sampled
+                    String = np.matmul(String, self.AdAd)
+                if n % 10 == 0:
+                    String = String / np.linalg.norm(String)  # safe and enough to renormalize here
+
+                print('pu', self.decision_prob_theoretical[n, k, 1])
+
+        print('self.decision_prob_theoretical[6:, :, 1]', self.decision_prob_theoretical[6:, :, 1])
+
+        return
+
 
     # Transform bit configuration array into integer
     def bits2int(self, bits):
@@ -294,10 +334,11 @@ if __name__ == '__main__':
 
     print('\nInputs:  ################################################################################################')
 
-    N_spins_ = 5
-    K_paths_ = 2000
+    chi0 = 4
+    N_spins = 8
+    K_paths = 10000
 
-    samples_file = 'samples.npz'
+    samples_file = 'samples_' + str(chi0) + '_' +str(N_spins) + '_' + str(K_paths) + '.npz'
     M_tensor_file = 'M_tensor'
     transient_multiplier = 0.0  # transient_size = transient_multiplier * sampler.xi
     visualization_noise = 0.0
@@ -333,8 +374,8 @@ if __name__ == '__main__':
         dumpM_file = 'M_tensor_33'
     else:
         np.random.seed(104)  # 104: xi=5.27
-        Au = np.random.randn(2,2)
-        Ad = np.random.randn(2,2)
+        Au = np.random.randn(chi0, chi0)
+        Ad = np.random.randn(chi0, chi0)
         print('M:', Au, '\n', Ad)
         M_tensor = np.array([Au, Ad])
         dumpM_file = 'M_tensor_seed104'
@@ -346,8 +387,8 @@ if __name__ == '__main__':
     np.savez(dumpM_file, M=M_tensor)     # specific file, always the same, and has specific name
     np.savez(M_tensor_file, M=M_tensor)  # general file, always different
 
-    input_params = {'N_spins': N_spins_,
-                    'K_paths': K_paths_,
+    input_params = {'N_spins': N_spins,
+                    'K_paths': K_paths,
                     'M_tensor': M_tensor,
                     'transient_multiplier': transient_multiplier,
                     'visualization_noise': visualization_noise,
@@ -372,9 +413,19 @@ if __name__ == '__main__':
     print('\nAverage sampled loglikelihood:', sampler.loglikelihood_tot)
     print('Naive p=0.5 model loglikelihood:', sampler.naive_model_loglikelihood)
 
+    #sampler.populate_decision_prob_theoretical()
+    #exit()
+
+    comparator = MPS_comparator(M_tensor, M_tensor, samples)
+    pu_tree = comparator.A_to_pu_tree(M_tensor)
+
+    exit()
+
+
+
     # saving to disk:
     np.savez(samples_file, samples=samples, sample_probs=sample_probs,
-             decision_prob_matrix=sampler.decision_prob_theoretical)
+             decision_prob_matrix=sampler.decision_prob_theoretical, M_tensor=M_tensor)
     print('\nSamples dumped in to', samples_file)
 
 

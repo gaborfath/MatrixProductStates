@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import eig
 from scipy.stats import norm
+import sys
 
 
 class MPS_comparator():
@@ -87,6 +88,82 @@ class MPS_comparator():
             print('')
 
         return
+
+    def int2bits(self, n, num_bits):
+        # n: integer to convert to binary array
+        # num_bits: min length of the resulting numpy array
+        return np.array([int(i) for i in bin(n)[2:].zfill(num_bits)])
+
+    def A_to_pu_tree(self, M):
+        # From the MPS tensor M determine the contingent sampling probability tree p_up(history)
+        np.set_printoptions(threshold=np.inf)
+        np.set_printoptions(linewidth=np.inf)
+
+        Au = M[0]
+        Ad = M[1]
+        chi = Au.shape[0]
+
+        AuAu = np.kron(Au, Au)
+        AdAd = np.kron(Ad, Ad)
+        E = AuAu + AdAd
+
+        w, vl, vr = eig(E, left=True, right=True)
+
+        indices = np.argsort(np.abs(w))
+        ind = indices[-1]
+        lam = w[ind]
+        if abs(np.imag(lam)) > 1e-12:
+            print('Complex lam:', lam)
+            exit('Complex lam')
+        else:
+            lam = np.real(lam)
+        R = np.real(vr[:, ind])  # is it valid?
+        L = np.real(vl[:, ind])  # is it valid?
+        LR = np.dot(L, R)
+        xi = 1 / np.log(np.abs(w[indices[-1]] / w[indices[-2]]))
+
+
+        AuAuR = np.matmul(AuAu, R) / LR
+        AdAdR = np.matmul(AdAd, R) / LR
+
+        pu_tree = -np.ones([2**(self.N_spins), self.N_spins])
+        decision_prob_theoretical = np.empty([self.N_spins, 2 ** (self.N_spins - 1), 2])  # site, node, spin
+        decision_prob_theoretical.fill(np.nan)
+
+
+        for k in range(2**(self.N_spins)):
+            k_bits = self.int2bits(k, self.N_spins)
+            print('Processing config:', k, k_bits)
+
+            String = L
+
+            current_int_config = 0
+
+            for n in range(self.N_spins):
+                String_AuAuR = np.matmul(String, AuAuR)
+                String_AdAdR = np.matmul(String, AdAdR)  # decreasing exponentially!? -> normalize
+                # print('hah0:', k, 'n:', n, String_AuAuR, String_AdAdR, String)
+                # print('hah1:', k, 'n:', n, String_AuAuR, String_AdAdR)
+                #
+                pu = String_AuAuR / (String_AuAuR + String_AdAdR)
+                decision_prob_theoretical[n, current_int_config, 1] = pu  # [site, node, decision] -> prob
+                decision_prob_theoretical[n, current_int_config, 0] = 1 - pu  # [site, node, decision] -> prob
+
+                pu_tree[k, n] = pu
+
+                if k_bits[n] == 1:  # spin-up sampled
+                    current_int_config = 2 * current_int_config + 1
+                    String = np.matmul(String, AuAu)
+                else:  # spin-down sampled
+                    current_int_config = 2 * current_int_config
+                    String = np.matmul(String, AdAd)
+                if n % 10 == 0:
+                    String = String / np.linalg.norm(String)  # safe and enough to renormalize here
+
+        print('comparator: A_to_tree_probs:', pu_tree)
+
+        return pu_tree
+
 
     #-------------------------------------------------------------------------------------------------------------------
     def compare(self):

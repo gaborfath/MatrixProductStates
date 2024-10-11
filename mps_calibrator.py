@@ -180,6 +180,7 @@ class MPSCalibrator(Model):
         self.samples = train_data['samples']
         self.sample_probs = train_data['sample_probs']
         self.decision_prob_matrix = train_data['decision_prob_matrix']
+        self.M_behind_sample = train_data['M_tensor']
 
         print('datafile:', datafile,
               'samples.shape:', self.samples.shape, 'sample_probs.shape:', self.sample_probs.shape, '\n')
@@ -281,9 +282,9 @@ class MPSCalibrator(Model):
 
         # To compare with known target M_target on the fly:
         if 1:
-            M_target_file = 'M_tensor'  # 'M_tensor_eps01' 'M_tensor_seed104' 'M_tensor'
-            npzfile = np.load(M_target_file + '.npz')
-            M_target = npzfile['M']
+            #npzfile = np.load(M_target_file + '.npz')
+            #M_target = npzfile['M']
+            M_target = self.M_behind_sample
             print('M_target:\n', M_target)
 
             npzfile = np.load(self.outfile_currentbest + '.npz')
@@ -349,6 +350,9 @@ class MPSCalibrator(Model):
                 pu =  tr_u / (tr_u + tr_d)
 
                 pu_exact = self.decision_prob_matrix[n, current_int_config, 1]               #self.sample_probs[k, n]
+
+                #print('puexact', pu_exact, n, current_int_config) may be nan as it is based on the config actually generated
+
                 mse += tf.square(pu - pu_exact) #* 2**n
                 #print('k, n:', k, n, 'pu:', pu, 'pu_exact:', pu_exact)
 
@@ -368,6 +372,8 @@ class MPSCalibrator(Model):
         if mse.numpy() < self.min_loss:
             self.record_currentbest(mse.numpy(), A)
 
+        print('mse:', mse)
+        #exit()
         return mse  # mse to minimize
 
 
@@ -544,7 +550,7 @@ class MPSCalibrator(Model):
             value, grad = tfp.math.value_and_gradient(self.lossfunction, A)
             values[i] = value.numpy()
             grad_norms[i] = tf.norm(grad, axis=-1).numpy()
-            if 1:
+            if 0:
                 print('Value:', value.numpy())
                 #print('Gradient:', grad)
                 print('Grad norm:', tf.norm(grad, axis=-1).numpy())
@@ -597,12 +603,12 @@ if __name__ == '__main__':
         loss_version = 'likelihood'
 
     # Calibration parameters:
-    chi = 2  # starting value 4
+    chi = 6  # starting value 4
     grad_tolerance = 1.e-9 #-6
     learning_rate = 0.01  # 0.001 default - no impact for BFGS
 
     # Samples to calibrate to:
-    datafile = 'samples.npz'
+    datafile = 'samples_4_8_10000.npz'  #'samples_5_2000.npz'
 
     # Write result M tensor to:
     outfile = 'MPS_calibrator_M_final'
@@ -635,7 +641,7 @@ if __name__ == '__main__':
         A0 = np.random.randn(2, chi, chi)  # 2 => up, down
     elif 0:
         A0 = [np.ones([chi, chi]), np.ones([chi, chi])]  # gets stuck immediately in a local minimum
-    elif 1:
+    elif 0:
         M_target_file = 'M_tensor_seed104'  # 'M_tensor_eps01' 'M_tensor_seed104' 'M_tensor'
         npzfile = np.load(M_target_file + '.npz')
         A0 = npzfile['M'] + 1.2 * np.random.randn(2, chi, chi) #should be good??
@@ -645,10 +651,11 @@ if __name__ == '__main__':
         npzfile = np.load(M_target_file + '.npz')
         A0 = npzfile['M'] + 0.0 * np.random.randn(2, chi, chi)
 
-    if 1:
+    # Create a plot where we interpolate between two A tensors
+    if 0:
         calibrator = MPSCalibrator(train_data, k, None, loss_version, A0, learning_rate, axs, None,
                                    grad_tolerance)
-        lambdas = np.linspace(0,1,1000)
+        lambdas = np.linspace(0,1,100)
 
         M_target_file = 'M_tensor_seed104'  # 'M_tensor_eps01' 'M_tensor_seed104' 'M_tensor'
         npzfile = np.load(M_target_file + '.npz')
